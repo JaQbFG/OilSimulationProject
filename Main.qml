@@ -68,7 +68,16 @@ ApplicationWindow {
                 }
 
                 center: QtPositioning.coordinate(50.613127, 16.049295)
-                zoomLevel: 4
+
+                property real targetZoom: 4
+                zoomLevel: targetZoom
+
+                Behavior on zoomLevel {
+                    NumberAnimation {
+                        duration: 150
+                        easing.type: Easing.OutCubic
+                    }
+                }
 
                 // property real minLatitude: 52.30
                 // property real maxLatitude: 52.50
@@ -91,11 +100,11 @@ ApplicationWindow {
                 property real maxZoom: 8
 
                 onZoomLevelChanged: {
-                    if (map.zoomLevel < minZoom) {
-                        map.zoomLevel = minZoom
+                    if (map.targetZoom < minZoom) {
+                        map.targetZoom = minZoom
                     }
-                    if (map.zoomLevel > maxZoom) {
-                        map.zoomLevel = maxZoom
+                    if (map.targetZoom > maxZoom) {
+                        map.targetZoom = maxZoom
                     }
                 }
 
@@ -106,9 +115,9 @@ ApplicationWindow {
 
                     onWheel: function(event) {
                         if (event.angleDelta.y > 0) {
-                            map.zoomLevel += 0.25
+                            map.targetZoom += 0.25
                         } else {
-                            map.zoomLevel -= 0.25
+                            map.targetZoom -= 0.25
                         }
                     }
 
@@ -141,7 +150,7 @@ ApplicationWindow {
                     anchors.margins: 8
 
                     onClicked: {
-                        map.zoomLevel += 1
+                        map.targetZoom += 1
                     }
 
                     background: Rectangle {
@@ -161,7 +170,7 @@ ApplicationWindow {
                     anchors.rightMargin: 8
 
                     onClicked: {
-                        map.zoomLevel -= 1
+                        map.targetZoom -= 1
                     }
 
                     background: Rectangle {
@@ -175,7 +184,7 @@ ApplicationWindow {
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: qsTr("Przybliżenie: " + map.zoomLevel / 4 + "x")
+                    text: qsTr("Przybliżenie: " + map.targetZoom.toFixed(1) / 4 + "x")
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 8
