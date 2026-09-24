@@ -1,11 +1,12 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
-
+import QtLocation
+import QtPositioning
 
 ApplicationWindow {
     id: window
-    width: 640
+    width: 800
     height: 480
     minimumWidth: 200
     minimumHeight: 250
@@ -19,7 +20,7 @@ ApplicationWindow {
 
     GridLayout {
         id: grid
-        columns: width < 400 ? 1 : 2
+        columns: width < 600 ? 1 : 2
         rowSpacing: 0
         columnSpacing: 0
         anchors.fill: parent
@@ -29,6 +30,7 @@ ApplicationWindow {
             color: window.lightMode ? window.reallyLight : window.reallyDark
             Layout.fillHeight: true
             Layout.fillWidth: true
+            Layout.preferredWidth: 3
 
             ColumnLayout {
                 anchors.fill: parent
@@ -37,9 +39,9 @@ ApplicationWindow {
                 Label {
                     id: text1
                     color: window.lightMode ? window.dark : window.light
-                    font.pixelSize: 120
+                    font.pixelSize: 24
                     fontSizeMode: Text.Fit
-                    text: qsTr("Hello World")
+                    text: qsTr("Pick a location")
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.margins: 16
@@ -54,36 +56,188 @@ ApplicationWindow {
             color: window.lightMode ? window.light : window.dark
             Layout.fillHeight: true
             Layout.fillWidth: true
+            Layout.preferredWidth: 7
 
-            ColumnLayout {
+            Map {
+                id: map
                 anchors.fill: parent
-                Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
+                copyrightsVisible : false
+
+                plugin: Plugin {
+                    name: "osm"
+                }
+
+                center: QtPositioning.coordinate(50.613127, 16.049295)
+                zoomLevel: 4
+
+                // property real minLatitude: 52.30
+                // property real maxLatitude: 52.50
+                // property real minLongitude: 16.75
+                // property real maxLongitude: 17.10
+
+                // onCenterChanged: {
+                //     var lat = center.latitude
+                //     var lon = center.longitude
+
+                //     lat = Math.max(minLatitude, Math.min(maxLatitude, lat))
+                //     lon = Math.max(minLongitude, Math.min(maxLongitude, lon))
+
+                //     if (lat !== center.latitude || lon !== center.longitude) {
+                //         center = QtPositioning.coordinate(lat, lon)
+                //     }
+                // }
+
+                property real minZoom: 4
+                property real maxZoom: 8
+
+                onZoomLevelChanged: {
+                    if (map.zoomLevel < minZoom) {
+                        map.zoomLevel = minZoom
+                    }
+                    if (map.zoomLevel > maxZoom) {
+                        map.zoomLevel = maxZoom
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    property real lastX
+                    property real lastY
+
+                    onWheel: function(event) {
+                        if (event.angleDelta.y > 0) {
+                            map.zoomLevel += 0.25
+                        } else {
+                            map.zoomLevel -= 0.25
+                        }
+                    }
+
+                    onPressed: {
+                        lastX = mouse.x
+                        lastY = mouse.y
+                    }
+
+                    onPositionChanged: {
+                        if (pressed) {
+                            var dx = lastX - mouse.x
+                            var dy = lastY - mouse.y
+
+                            map.pan(dx, dy)
+
+                            lastX = mouse.x
+                            lastY = mouse.y
+                        }
+                    }
+                }
 
                 Button {
-                    id: button1
-                    text: window.lightMode ? qsTr("\u263D  Dark mode")
-                                           : qsTr("\u263C  Light mode")
-                    Layout.bottomMargin: 16
-                    Layout.alignment: Qt.AlignHCenter | Qt.AlignBottom
+                    id:zoomIn
+                    text: "+"
+                    width: 30
+                    height: 30
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 42
+                    anchors.margins: 8
 
-                    contentItem: Text {
-                        text: button1.text
-                        color: window.lightMode ? window.light : window.dark
-                        font: button1.font
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+                    onClicked: {
+                        map.zoomLevel += 1
                     }
 
                     background: Rectangle {
-                        implicitWidth: 120
-                        implicitHeight: 36
                         radius: 8
-                        color: window.lightMode ? window.dark : window.light
+                        color: window.lightMode ? window.light : window.dark
+                    }
+                }
+
+                Button {
+                    id: zoomOut
+                    text: "−"
+                    width: 30
+                    height: 30
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 8
+                    anchors.rightMargin: 8
+
+                    onClicked: {
+                        map.zoomLevel -= 1
                     }
 
-                    onClicked: window.lightMode = !window.lightMode
+                    background: Rectangle {
+                        radius: 8
+                        color: window.lightMode ? window.light : window.dark
+                    }
+                }
+
+                Label {
+                    id: zoom
+                    color: window.lightMode ? window.light : window.dark
+                    font.pixelSize: 12
+                    fontSizeMode: Text.Fit
+                    text: qsTr("Przybliżenie: " + map.zoomLevel / 4 + "x")
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 8
+                    anchors.rightMargin: 46
+                }
+
+                Label {
+                    id: longitude
+                    color: window.lightMode ? window.light : window.dark
+                    font.pixelSize: 12
+                    fontSizeMode: Text.Fit
+                    text: qsTr("Dł: " + map.center.longitude.toFixed(5) + "")
+                    anchors.left: parent.left
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 24
+                    anchors.leftMargin: 10
+                }
+
+                Label {
+                    id: latitude
+                    color: window.lightMode ? window.light : window.dark
+                    font.pixelSize: 12
+                    fontSizeMode: Text.Fit
+                    text: qsTr("Sz: " + map.center.latitude.toFixed(5) + "")
+                    anchors.left: parent.left
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 8
+                    anchors.leftMargin: 10
                 }
             }
+
+            // Nie wiem czy będziesz chcial ten przycisk mieć, więc komentuje na razie :DD
+
+            // ColumnLayout {
+            //     anchors.fill: parent
+            //     Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
+
+            //     Button {
+            //         id: button1
+            //         text: window.lightMode ? qsTr("\u263D  Dark mode")
+            //                                : qsTr("\u263C  Light mode")
+            //         Layout.bottomMargin: 16
+            //         Layout.alignment: Qt.AlignHCenter | Qt.AlignBottom
+
+            //         contentItem: Text {
+            //             text: button1.text
+            //             color: window.lightMode ? window.light : window.dark
+            //             font: button1.font
+            //             horizontalAlignment: Text.AlignHCenter
+            //             verticalAlignment: Text.AlignVCenter
+            //         }
+
+            //         background: Rectangle {
+            //             implicitWidth: 120
+            //             implicitHeight: 36
+            //             radius: 8
+            //             color: window.lightMode ? window.dark : window.light
+            //         }
+
+            //         onClicked: window.lightMode = !window.lightMode
+            //     }
+            // }
         }
     }
 
