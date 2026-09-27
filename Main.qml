@@ -11,7 +11,7 @@ ApplicationWindow {
     minimumWidth: 200
     minimumHeight: 250
     visible: true
-    title: qsTr("Hello World")
+    title: qsTr("Oil Simulation")
     property bool lightMode: Application.styleHints.colorScheme === Qt.Light
     property color reallyDark: "#1f1f1f"
     property color dark: "#262626"
@@ -37,11 +37,30 @@ ApplicationWindow {
                 Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
 
                 Label {
+                    visible: map.markerCoordinate == null
+
                     id: text1
+                    text: qsTr("Pick a location")
                     color: window.lightMode ? window.dark : window.light
+
                     font.pixelSize: 24
                     fontSizeMode: Text.Fit
-                    text: qsTr("Pick a location")
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: 16
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                Label {
+                    visible: map.markerCoordinate !== null
+
+                    id: markerInfo
+                    text: map.markerCoordinate === null ? "" : "Dł: " + map.markerCoordinate.longitude.toFixed(5) + "\nSz: " + map.markerCoordinate.latitude.toFixed(5)
+                    color: window.lightMode ? window.dark : window.light
+
+                    font.pixelSize: 24
+                    fontSizeMode: Text.Fit
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.margins: 16
@@ -67,7 +86,7 @@ ApplicationWindow {
                     name: "osm"
                 }
 
-                center: QtPositioning.coordinate(50.613127, 16.049295)
+                center: QtPositioning.coordinate(50.0, 16.0)
 
                 property real targetZoom: 4
                 zoomLevel: targetZoom
@@ -79,23 +98,6 @@ ApplicationWindow {
                     }
                 }
 
-                // property real minLatitude: 52.30
-                // property real maxLatitude: 52.50
-                // property real minLongitude: 16.75
-                // property real maxLongitude: 17.10
-
-                // onCenterChanged: {
-                //     var lat = center.latitude
-                //     var lon = center.longitude
-
-                //     lat = Math.max(minLatitude, Math.min(maxLatitude, lat))
-                //     lon = Math.max(minLongitude, Math.min(maxLongitude, lon))
-
-                //     if (lat !== center.latitude || lon !== center.longitude) {
-                //         center = QtPositioning.coordinate(lat, lon)
-                //     }
-                // }
-
                 property real minZoom: 4
                 property real maxZoom: 8
 
@@ -103,15 +105,89 @@ ApplicationWindow {
                     if (map.targetZoom < minZoom) {
                         map.targetZoom = minZoom
                     }
-                    if (map.targetZoom > maxZoom) {
+                    else if (map.targetZoom > maxZoom) {
                         map.targetZoom = maxZoom
+                    }
+                    mapMouseArea.keepInsideBounds()
+                }
+
+                property var markerCoordinate: null
+
+                MapQuickItem {
+                    id: marker
+                    coordinate: map.markerCoordinate
+                    visible: map.markerCoordinate !== null
+                    anchorPoint.x: markerImage.width / 2
+                    anchorPoint.y: markerImage.height / 2
+
+                    sourceItem: Rectangle {
+                        id: markerImage
+                        width: 16
+                        height: 16
+                        radius: 10
+                        color: "white"
+                        border.width: 1
+                        border.color: "black"
                     }
                 }
 
                 MouseArea {
+                    id: mapMouseArea
                     anchors.fill: parent
-                    property real lastX
-                    property real lastY
+
+                    property real lastX: 0
+                    property real lastY: 0
+
+                    property real pressX: 0
+                    property real pressY: 0
+
+                    property bool hasDragged: false
+
+                    property real northLimit: 71.8
+                    property real southLimit: 29.9
+                    property real westLimit: -11.0
+                    property real eastLimit: 42.4
+
+                    function isInsideBounds(coordinate) {
+                        return coordinate.latitude >= southLimit &&
+                               coordinate.latitude <= northLimit &&
+                               coordinate.longitude >= westLimit &&
+                               coordinate.longitude <= eastLimit
+                    }
+
+                    function keepInsideBounds() {
+                        var tl = map.toCoordinate(Qt.point(0, 0))
+                        var br = map.toCoordinate(Qt.point(map.width, map.height))
+
+                        var north = tl.latitude
+                        var south = br.latitude
+                        var west = tl.longitude
+                        var east = br.longitude
+
+                        var correctionLat = 0
+                        var correctionLon = 0
+
+                        if (north > northLimit && south < southLimit)
+                            correctionLat = (northLimit + southLimit) / 2 - (north + south) / 2
+                        else if (north > northLimit)
+                            correctionLat = northLimit - north
+                        else if (south < southLimit)
+                            correctionLat = southLimit - south
+
+                        if (east > eastLimit && west < westLimit)
+                            correctionLon = (westLimit + eastLimit) / 2 - (west + east) / 2
+                        else if (east > eastLimit)
+                            correctionLon = eastLimit - east
+                        else if (west < westLimit)
+                            correctionLon = westLimit - west
+
+                        if (correctionLat || correctionLon) {
+                            var center = map.center
+                            center.latitude += correctionLat
+                            center.longitude += correctionLon
+                            map.center = center
+                        }
+                    }
 
                     onWheel: function(event) {
                         if (event.angleDelta.y > 0) {
@@ -122,19 +198,45 @@ ApplicationWindow {
                     }
 
                     onPressed: {
+                        pressX = mouse.x
+                        pressY = mouse.y
+
+                        hasDragged = false
+
                         lastX = mouse.x
                         lastY = mouse.y
                     }
 
                     onPositionChanged: {
-                        if (pressed) {
-                            var dx = lastX - mouse.x
-                            var dy = lastY - mouse.y
+                        if (!pressed)
+                            return
 
-                            map.pan(dx, dy)
+                        if (Math.abs(mouse.x - pressX) > 5 || Math.abs(mouse.y - pressY) > 5) {
+                            hasDragged = true
+                        }
 
-                            lastX = mouse.x
-                            lastY = mouse.y
+                        var dx = lastX - mouse.x
+                        var dy = lastY - mouse.y
+
+                        map.pan(dx, dy)
+
+                        var center = map.center
+
+                        keepInsideBounds()
+
+                        lastX = mouse.x
+                        lastY = mouse.y
+                    }
+
+                    onReleased: {
+                        if (!hasDragged) {
+                            var coordinate = map.toCoordinate(
+                                Qt.point(mouse.x, mouse.y)
+                            )
+
+                            if (isInsideBounds(coordinate)){
+                                map.markerCoordinate = coordinate
+                            }
                         }
                     }
                 }
@@ -184,7 +286,7 @@ ApplicationWindow {
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: qsTr("Przybliżenie: " + map.targetZoom.toFixed(1) / 4 + "x")
+                    text: "Przybliżenie: " + map.targetZoom.toFixed(1) / 4 + "x"
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 8
@@ -196,7 +298,7 @@ ApplicationWindow {
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: qsTr("Dł: " + map.center.longitude.toFixed(5) + "")
+                    text: "Dł: " + map.center.longitude.toFixed(5) + ""
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 24
@@ -208,7 +310,7 @@ ApplicationWindow {
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: qsTr("Sz: " + map.center.latitude.toFixed(5) + "")
+                    text: "Sz: " + map.center.latitude.toFixed(5) + ""
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 8
