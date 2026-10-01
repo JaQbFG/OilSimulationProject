@@ -28,54 +28,195 @@ ApplicationWindow {
         Rectangle {
             id: rectangle1
             color: window.lightMode ? window.reallyLight : window.reallyDark
+
             Layout.fillHeight: true
             Layout.fillWidth: true
-            Layout.preferredWidth: 3
+            Layout.minimumWidth: 0
+            Layout.preferredWidth: 30
 
             ColumnLayout {
-                anchors.fill: parent
-                Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
+                anchors.centerIn: parent
+                width: Math.min(parent.width - 30, 300)
 
-                Label {
-                    visible: map.markerCoordinate == null
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
 
-                    id: text1
-                    text: qsTr("Pick a location")
-                    color: window.lightMode ? window.dark : window.light
+                    Label {
+                        id: latLabel
+                        text: "Sz.:"
+                        color: window.lightMode ? window.dark : window.light
+                        font.pixelSize: 16
+                        fontSizeMode: Text.Fit
+                        Layout.preferredWidth: 20
+                        Layout.fillHeight: true
+                        Layout.margins: 8
+                        horizontalAlignment: Text.AlignHLeft
+                        verticalAlignment: Text.AlignVCenter
 
-                    font.pixelSize: 24
-                    fontSizeMode: Text.Fit
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.margins: 16
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
+                    }
+                    TextField {
+                        id: latInput
+                        placeholderText: "Podaj szerokośc..."
+
+                        Layout.fillWidth: true
+                        font.pixelSize: 12
+
+                        padding: 10
+
+                        background: Rectangle {
+                            radius: 6
+                            color: window.lightMode ? "white" : "#111111"
+                            border.color: window.lightMode ? "#cccccc" : "#444444"
+                            border.width: 1
+                        }
+                    }
                 }
 
-                Label {
-                    visible: map.markerCoordinate !== null
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
 
-                    id: markerInfo
-                    text: map.markerCoordinate === null ? "" : "Dł: " + map.markerCoordinate.longitude.toFixed(5) + "\nSz: " + map.markerCoordinate.latitude.toFixed(5)
-                    color: window.lightMode ? window.dark : window.light
+                    Label {
+                        id: lonLabel
+                        text: "Dł.:"
+                        color: window.lightMode ? window.dark : window.light
+                        font.pixelSize: 16
+                        fontSizeMode: Text.Fit
+                        Layout.preferredWidth: 20
+                        Layout.fillHeight: true
+                        Layout.margins: 8
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
 
-                    font.pixelSize: 24
-                    fontSizeMode: Text.Fit
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.margins: 16
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
+                    TextField {
+                        id: lonInput
+                        placeholderText: "Podaj długość..."
+
+                        Layout.fillWidth: true
+                        font.pixelSize: 12
+
+                        padding: 10
+
+                        background: Rectangle {
+                            radius: 6
+                            color: window.lightMode ? "white" : "#111111"
+                            border.color: window.lightMode ? "#cccccc" : "#444444"
+                            border.width: 1
+                        }
+                    }
                 }
+
+                Button {
+                    text: "Postaw"
+
+                    Layout.fillWidth: true
+                    Layout.topMargin: 2
+                    Layout.bottomMargin: 8
+                    padding: 10
+
+                    background: Rectangle {
+                        radius: 6
+                        color: window.lightMode ? "white" : "#333333"
+                        border.color: window.lightMode ? "#cccccc" : "#444444"
+                        border.width: 1
+                    }
+
+                    onClicked: {
+                        if (latInput.text.trim() === "" ||
+                            lonInput.text.trim() === "") {
+
+                            rectangle1.showError("Pola nie mogą być puste!")
+                            return
+                        }
+
+                        var latitude = Number(latInput.text.replace(",", "."))
+                        var longitude = Number(lonInput.text.replace(",", "."))
+
+                        if (!isFinite(latitude) || !isFinite(longitude)) {
+                            rectangle1.showError("Podaj prawidłowe współrzędne!")
+                            return
+                        }
+
+                        if (latitude < mapMouseArea.southLimit ||
+                            latitude > mapMouseArea.northLimit ||
+                            longitude < mapMouseArea.westLimit ||
+                            longitude > mapMouseArea.eastLimit) {
+
+                            rectangle1.showError("Marker jest poza dozwolonym obszarem!")
+                            return
+                        }
+
+                        map.markerCoordinate = QtPositioning.coordinate(latitude, longitude)
+                    }
+                }
+            }
+
+            Label {
+                id: errorMessage
+
+                text: ""
+
+                width: parent.width - 32
+
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 16
+
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Text.WordWrap
+
+                color: "red"
+                font.pixelSize: 10
+
+                visible: false
+                opacity: 0
+            }
+
+            Timer {
+                id: errorTimer
+                interval: 2500
+                repeat: false
+
+                onTriggered: {
+                    errorFade.start()
+                }
+            }
+
+            NumberAnimation {
+                id: errorFade
+
+                target: errorMessage
+                property: "opacity"
+                to: 0
+                duration: 500
+                easing.type: Easing.InOutQuad
+
+                onFinished: {
+                    errorMessage.visible = false
+                }
+            }
+
+            function showError(message) {
+                errorFade.stop()
+                errorTimer.stop()
+
+                errorMessage.text = message
+                errorMessage.opacity = 1
+                errorMessage.visible = true
+
+                errorTimer.start()
             }
         }
 
         Rectangle {
             id: rectangle2
             color: window.lightMode ? window.light : window.dark
+
             Layout.fillHeight: true
             Layout.fillWidth: true
-            Layout.preferredWidth: 7
+            Layout.minimumWidth: 0
+            Layout.preferredWidth: 50
 
             Map {
                 id: map
@@ -112,6 +253,13 @@ ApplicationWindow {
                 }
 
                 property var markerCoordinate: null
+
+                onMarkerCoordinateChanged: {
+                    if (markerCoordinate !== null) {
+                        latInput.text = markerCoordinate.latitude.toFixed(5)
+                        lonInput.text = markerCoordinate.longitude.toFixed(5)
+                    }
+                }
 
                 MapQuickItem {
                     id: marker
@@ -294,11 +442,11 @@ ApplicationWindow {
                 }
 
                 Label {
-                    id: longitude
+                    id: latitude
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: "Dł: " + map.center.longitude.toFixed(5) + ""
+                    text: "Sz.: " + map.center.latitude.toFixed(5) + ""
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 24
@@ -306,11 +454,11 @@ ApplicationWindow {
                 }
 
                 Label {
-                    id: latitude
+                    id: longitude
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: "Sz: " + map.center.latitude.toFixed(5) + ""
+                    text: "Dł.: " + map.center.longitude.toFixed(5) + ""
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 8
