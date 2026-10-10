@@ -7,9 +7,9 @@ int main(int argc, char *argv[]) {
 
     QQmlApplicationEngine engine;
 
-    CopernicusManager CopernicusManager;
+    CopernicusManager copernicusManager;
 
-    engine.rootContext()->setContextProperty("CopernicusManager", &CopernicusManager);
+    engine.rootContext()->setContextProperty("copernicusManager", &copernicusManager);
 
     engine.loadFromModule("OilSpillProject", "Main");
 
