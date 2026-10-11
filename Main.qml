@@ -39,27 +39,29 @@ ApplicationWindow {
                 width: Math.min(parent.width - 30, 300)
                 spacing: 6
 
-                RowLayout {
-                    Layout.alignment: AlignHCenter
+                Label {
+                    text: "Ustaw wskaźnik"
+                    color: window.lightMode ? window.dark : window.light
+                    font.bold: true
+                    font.pixelSize: 13
+                    Layout.alignment: Qt.AlignHCenter
+                }
 
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
                     Label {
                         id: latLabel
-                        text: "Sz.:"
+                        text: "Szerokość:"
                         color: window.lightMode ? window.dark : window.light
-                        font.pixelSize: 16
-                        fontSizeMode: Text.Fit
-                        Layout.preferredWidth: 20
-                        Layout.fillHeight: true
-                        Layout.margins: 8
-                        horizontalAlignment: Text.AlignHLeft
-                        verticalAlignment: Text.AlignVCenter
+                        font.pixelSize: 11
                     }
                     TextField {
                         id: latInput
                         placeholderText: "Podaj szerokość..."
                         Layout.fillWidth: true
-                        font.pixelSize: 12
-                        padding: 10
+                        font.pixelSize: 11
+                        padding: 8
                         background: Rectangle {
                             radius: 6
                             color: window.lightMode ? "white" : "#111111"
@@ -69,28 +71,21 @@ ApplicationWindow {
                     }
                 }
 
-                RowLayout {
-                    Layout.alignment: AlignHCenter
-
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
                     Label {
                         id: lonLabel
-                        text: "Dł.:"
+                        text: "Długość:"
                         color: window.lightMode ? window.dark : window.light
-                        font.pixelSize: 16
-                        fontSizeMode: Text.Fit
-                        Layout.preferredWidth: 20
-                        Layout.fillHeight: true
-                        Layout.margins: 8
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+                        font.pixelSize: 11
                     }
-
                     TextField {
                         id: lonInput
                         placeholderText: "Podaj długość..."
                         Layout.fillWidth: true
-                        font.pixelSize: 12
-                        padding: 10
+                        font.pixelSize: 11
+                        padding: 8
                         background: Rectangle {
                             radius: 6
                             color: window.lightMode ? "white" : "#111111"
@@ -103,8 +98,7 @@ ApplicationWindow {
                 Button {
                     text: "Postaw"
                     Layout.fillWidth: true
-                    Layout.topMargin: 2
-                    Layout.bottomMargin: 4
+                    Layout.topMargin: 4
                     padding: 10
 
                     background: Rectangle {
@@ -210,6 +204,7 @@ ApplicationWindow {
                     enabled: !copernicusManager.isDownloading
                     Layout.fillWidth: true
                     Layout.topMargin: 4
+                    Layout.bottomMargin: 4
                     padding: 10
                     background: Rectangle {
                         radius: 6
