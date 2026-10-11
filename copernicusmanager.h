@@ -37,6 +37,8 @@ class CopernicusManager : public QObject {
         int m_completedTasks = 0;
         int m_progress;
         bool m_isDownloading;
+        QString m_username;
+        QString m_password;
 };
 
 #endif // COPERNICUSMANAGER_H

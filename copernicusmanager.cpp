@@ -2,6 +2,9 @@
 #include <QDebug>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
+#include <QTextStream>
+#include <QProcessEnvironment>
 
 CopernicusManager::CopernicusManager(QObject *parent)
     : QObject(parent), m_progress(0), m_isDownloading(false) {}
@@ -22,8 +25,27 @@ void CopernicusManager::setDownloading(bool val) {
         emit isDownloadingChanged();
     }
 }
+
 void CopernicusManager::startBatchDownload(const QString &startStr, const QString &endStr, int hoursStep) {
     if (m_isDownloading) return;
+
+    QString credsFilePath = QCoreApplication::applicationDirPath() + "/credentials.txt";
+    QFile file(credsFilePath);
+
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit downloadFinished(false, "Błąd: Nie można znaleźć pliku credentials.txt!");
+        return;
+    }
+
+    QTextStream in(&file);
+    m_username = in.readLine().trimmed();
+    m_password = in.readLine().trimmed();
+    file.close();
+
+    if (m_username.isEmpty() || m_password.isEmpty()) {
+        emit downloadFinished(false, "Błąd: Plik credentials.txt jest pusty lub niekompletny!");
+        return;
+    }
 
     QDir dir(QCoreApplication::applicationDirPath());
     QStringList oldFiles = dir.entryList(QStringList() << "test_*.csv", QDir::Files);
@@ -73,6 +95,8 @@ void CopernicusManager::processNextInQueue() {
 
     QStringList args;
     args << "subset"
+         << "--username" << m_username
+         << "--password" << m_password
          << "-i" << "cmems_mod_glo_phy_anfc_merged-uv_PT1H-i"
          << "-v" << "utotal"
          << "-v" << "vtotal"
