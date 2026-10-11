@@ -38,6 +38,15 @@ set_target_properties(appOilSpillProject PROPERTIES
 target_link_libraries(appOilSpillProject
     PRIVATE Qt6::Quick
 )
+# Automatyczne kopiowanie copernicusmarine.exe oraz credentials.txt do folderu z wyjściowym .exe
+add_custom_command(TARGET appOilSpillProject POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/copernicusmarine.exe"
+    $<TARGET_FILE_DIR:appOilSpillProject>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/credentials.txt"
+    $<TARGET_FILE_DIR:appOilSpillProject>
+)
 
 install(TARGETS appOilSpillProject
     BUNDLE DESTINATION .
