@@ -560,8 +560,8 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 8
 
-                width: errorMessage.width + 46
-                height: Math.max(errorMessage.implicitHeight, 10) + 16
+                width: errorMessage.width + 38
+                height: Math.max(errorMessage.implicitHeight, 10) + 12
 
                 radius: 8
                 color: window.dark
