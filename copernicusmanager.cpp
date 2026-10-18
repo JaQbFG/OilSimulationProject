@@ -1,298 +1,713 @@
 #include "CopernicusManager.h"
+#include "SurfaceCurrentParser.h"
+
 #include <QDebug>
 #include <QCoreApplication>
-#include <QDir>
 #include <QFile>
 #include <QTextStream>
-#include <QProcessEnvironment>
+#include <QProcess>
+#include <QDir>
+#include <QFutureWatcher>
+#include <QtMath>
 
-static const QString kSurfaceDepth = "0.49402499198913574";
+#include <QtConcurrentRun>
+#include <QFileInfo>
+#include <cmath>
+#include <memory>
+
+
+static const QString kSurfaceDepth =
+    "0.49402499198913574";
+
+
+struct SurfaceParseResult
+{
+    bool success = false;
+    SurfaceCurrentData data;
+    QString error;
+};
+
 
 CopernicusManager::CopernicusManager(QObject *parent)
-    : QObject(parent), m_progress(0), m_isDownloading(false) {}
-
-int CopernicusManager::progress() const { return m_progress; }
-bool CopernicusManager::isDownloading() const { return m_isDownloading; }
-
-bool CopernicusManager::loadCredentials()
+    : QObject(parent)
 {
-    QFile file(QCoreApplication::applicationDirPath() + "/credentials.txt");
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qDebug() << "Nie można otworzyć credentials.txt:" << file.errorString();
-        return false;
-    }
-    QTextStream in(&file);
-    m_username = in.readLine().trimmed();
-    m_password = in.readLine().trimmed();
-    return !m_username.isEmpty() && !m_password.isEmpty();
 }
 
-void CopernicusManager::setProgress(int val) {
-    if (m_progress != val) {
-        m_progress = val;
+int CopernicusManager::progress() const
+{
+    return m_progress;
+}
+
+bool CopernicusManager::isDownloading() const
+{
+    return m_isDownloading;
+}
+
+void CopernicusManager::setProgress(int value)
+{
+    if (m_progress != value) {
+        m_progress = value;
         emit progressChanged();
     }
 }
 
-void CopernicusManager::setDownloading(bool val) {
-    if (m_isDownloading != val) {
-        m_isDownloading = val;
+void CopernicusManager::setDownloading(bool value)
+{
+    if (m_isDownloading != value) {
+        m_isDownloading = value;
         emit isDownloadingChanged();
     }
 }
 
-void CopernicusManager::checkLocation(double latitude, double longitude, const QString &timeStr)
+bool CopernicusManager::loadCredentials()
 {
-    if (!loadCredentials()) {
-        emit locationCheckFinished(false, false, "Nie udało się wczytać danych logowania.");
-        return;
-    }
-    if (m_isDownloading) {
-        emit locationCheckFinished(false, false, "Poczekaj na zakończenie pobierania.");
-        return;
-    }
-
-    QDateTime dt = QDateTime::fromString(timeStr, "yyyy-MM-dd'T'HH:mm:ss");
-    if (!dt.isValid()) {
-        emit locationCheckFinished(false, false, "Nieprawidłowa data.");
-        return;
-    }
-
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QString fileName = "location_check.csv";
-    const QString filePath = appDir + "/" + fileName;
-    QFile::remove(filePath);
-
-    const QString t = dt.toString("yyyy-MM-dd'T'HH:mm:ss");
-    const QString lon = QString::number(longitude, 'f', 6);
-    const QString lat = QString::number(latitude, 'f', 6);
-
-    QStringList args;
-    args << "subset"
-         << "--username" << m_username << "--password" << m_password
-         << "-i" << "cmems_mod_glo_phy_anfc_merged-uv_PT1H-i"
-         << "-v" << "utotal" << "-v" << "vtotal"
-         << "-t" << t << "-T" << t
-         << "-x" << lon << "-X" << lon
-         << "-y" << lat << "-Y" << lat
-         << "-z" << kSurfaceDepth << "-Z" << kSurfaceDepth
-         << "--file-format" << "csv"
-         << "-o" << appDir
-         << "-f" << fileName
-         << "--overwrite";
-
-    auto *process = new QProcess(this);
-    process->setWorkingDirectory(appDir);
-
-    connect(process, &QProcess::readyReadStandardError, this, [this, process]() {
-        emit logMessage(QString::fromUtf8(process->readAllStandardError()));
-    });
-    connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
-        emit logMessage(QString::fromUtf8(process->readAllStandardOutput()));
-    });
-
-    connect(process, &QProcess::errorOccurred, this,
-            [this, process](QProcess::ProcessError err) {
-                qDebug() << "Błąd QProcess:" << err << process->errorString();
-                if (err == QProcess::FailedToStart) {
-                    emit locationCheckFinished(false, false,
-                                               "Nie można uruchomić copernicusmarine.exe: " + process->errorString());
-                    process->deleteLater();
-                }
-            });
-
-    connect(process, &QProcess::finished, this,
-            [this, process, filePath](int exitCode, QProcess::ExitStatus) {
-                process->deleteLater();
-                qDebug() << "checkLocation finished, exit code:" << exitCode;
-
-                if (exitCode != 0) {
-                    emit locationCheckFinished(false, false, "Nie udało się pobrać danych dla lokalizacji.");
-                    return;
-                }
-
-                QString actualPath = filePath;
-                if (!QFile::exists(actualPath) && QFile::exists(filePath + ".csv"))
-                    actualPath += ".csv";
-
-                QFile csv(actualPath);
-                if (!csv.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                    emit locationCheckFinished(false, false,
-                                               "Nie można odczytać pliku: " + actualPath);
-                    return;
-                }
-
-                QTextStream in(&csv);
-                int uIdx = -1, vIdx = -1;
-                bool foundData = false, isLand = false;
-
-                while (!in.atEnd()) {
-                    const QString line = in.readLine().trimmed();
-                    if (line.isEmpty()) continue;
-                    const QStringList f = line.split(',', Qt::KeepEmptyParts);
-
-                    if (uIdx < 0 && line.contains("utotal")) {
-                        uIdx = f.indexOf("utotal");
-                        vIdx = f.indexOf("vtotal");
-                        continue;
-                    }
-                    if (f.size() < 3) continue;
-
-                    if (uIdx < 0) { uIdx = f.size() - 2; vIdx = f.size() - 1; }
-
-                    auto val = [&](int i) { return i < f.size() ? f[i].trimmed() : QString(); };
-                    auto empty = [](const QString &s) {
-                        return s.isEmpty() || s.compare("nan", Qt::CaseInsensitive) == 0;
-                    };
-
-                    isLand = empty(val(uIdx)) && empty(val(vIdx));
-                    foundData = true;
-                    break;
-                }
-
-                csv.close();
-                QFile::remove(actualPath);
-
-                if (!foundData) {
-                    emit locationCheckFinished(false, false, "Plik nie zawiera danych do sprawdzenia.");
-                    return;
-                }
-                emit locationCheckFinished(true, isLand,
-                                           isLand ? "Lokalizacja znajduje się na lądzie."
-                                                  : "Lokalizacja znajduje się na wodzie.");
-            });
-
-    qDebug() << "Uruchamiam:" << appDir + "/copernicusmarine.exe" << args;
-    process->start(appDir + "/copernicusmarine.exe", args);
-}
-
-void CopernicusManager::startBatchDownload(const QString &startStr, const QString &endStr, int hoursStep) {
-    if (!loadCredentials()) {
-        emit locationCheckFinished(
-            false, false,
-            "Nie udało się wczytać danych logowania."
-            );
-        return;
-    }
-
-    if (m_isDownloading) return;
-
-    QString credsFilePath = QCoreApplication::applicationDirPath() + "/credentials.txt";
-    QFile file(credsFilePath);
+    QFile file(
+        QCoreApplication::applicationDirPath()
+        + "/credentials.txt"
+        );
 
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        emit downloadFinished(false, "Błąd: Nie można znaleźć pliku credentials.txt!");
-        return;
+        qDebug() << "Nie można otworzyć credentials.txt:"
+                 << file.errorString();
+
+        return false;
     }
 
     QTextStream in(&file);
+
     m_username = in.readLine().trimmed();
     m_password = in.readLine().trimmed();
+
     file.close();
 
-    if (m_username.isEmpty() || m_password.isEmpty()) {
-        emit downloadFinished(false, "Błąd: Plik credentials.txt jest pusty lub niekompletny!");
-        return;
-    }
+    return !m_username.isEmpty()
+           && !m_password.isEmpty();
+}
 
-    QDir dir(QCoreApplication::applicationDirPath());
-    QStringList oldFiles = dir.entryList(QStringList() << "test_*.csv", QDir::Files);
-    for (const QString &filename : oldFiles) {
-        dir.remove(filename);
-    }
 
-    QDateTime start = QDateTime::fromString(startStr, "yyyy-MM-ddTHH:mm:ss");
-    QDateTime end = QDateTime::fromString(endStr, "yyyy-MM-ddTHH:mm:ss");
+void CopernicusManager::prepareSurfaceData(
+    const QString &startStr,
+    const QString &endStr,
+    int hoursStep)
+{
+    if (m_isDownloading) {
+        emit initialSurfaceDataLoaded(
+            false,
+            "Pobieranie lub wczytywanie danych już trwa."
+            );
 
-    if (!start.isValid() || !end.isValid() || start > end) {
-        emit downloadFinished(false, "Nieprawidłowy zakres dat!");
         return;
     }
 
     m_timeQueue.clear();
+    m_surfaceData = SurfaceCurrentData{};
+
+    m_initialLoadPending = false;
+
+    setProgress(0);
+
+    if (!loadCredentials()) {
+        emit initialSurfaceDataLoaded(
+            false,
+            "Nie udało się wczytać danych logowania."
+            );
+
+        return;
+    }
+
+    QDateTime start = QDateTime::fromString(
+        startStr,
+        Qt::ISODate
+        );
+
+    QDateTime end = QDateTime::fromString(
+        endStr,
+        Qt::ISODate
+        );
+
+    if (!start.isValid() ||
+        !end.isValid() ||
+        start > end ||
+        hoursStep <= 0) {
+
+        emit initialSurfaceDataLoaded(
+            false,
+            "Nieprawidłowy zakres dat lub krok czasowy."
+            );
+
+        return;
+    }
+
+    if (start.time().minute() != 0 ||
+        start.time().second() != 0 ||
+        end.time().minute() != 0 ||
+        end.time().second() != 0) {
+
+        emit initialSurfaceDataLoaded(
+            false,
+            "Podaj pełne godziny, np. 2026-10-11T20:00:00."
+            );
+
+        return;
+    }
+
     QDateTime current = start;
+
     while (current <= end) {
         m_timeQueue.enqueue(current);
-        current = current.addSecs(hoursStep * 3600);
+
+        current = current.addSecs(
+            static_cast<qint64>(hoursStep) * 3600
+            );
     }
 
     if (m_timeQueue.isEmpty()) {
-        emit downloadFinished(false, "Brak dat do pobrania w podanym zakresie.");
+        emit initialSurfaceDataLoaded(
+            false,
+            "Nie znaleziono terminów do pobrania."
+            );
+
         return;
     }
 
     m_totalTasks = m_timeQueue.size();
     m_completedTasks = 0;
-    setDownloading(true);
-    setProgress(0);
 
-    processNextInQueue();
+    m_initialLoadPending = true;
+
+    emit logMessage(
+        QString("Przygotowano %1 terminów. Pobieram pierwszy plik.")
+            .arg(m_totalTasks)
+        );
+
+
+    downloadNext();
 }
 
-void CopernicusManager::processNextInQueue() {
-    if (m_timeQueue.isEmpty()) {
-        setDownloading(false);
-        emit downloadFinished(true, "Pobieranie wszystkich plików zakończone sukcesem!");
+
+
+void CopernicusManager::startBatchDownload(
+    const QString &startStr,
+    const QString &endStr,
+    int hoursStep)
+{
+    prepareSurfaceData(
+        startStr,
+        endStr,
+        hoursStep
+        );
+}
+
+
+void CopernicusManager::downloadNext()
+{
+    if (m_isDownloading) {
+        emit logMessage(
+            "Pobieranie lub parsowanie już trwa."
+            );
+
         return;
     }
 
-    QDateTime dt = m_timeQueue.dequeue();
-    QString timeFormatted = dt.toString("yyyy-MM-dd'T'hh:mm:ss");
-    QString fileSuffix = dt.toString("yyyyMMdd_hhmmss");
-    QString outputFileName = QString("test_%1").arg(fileSuffix);
+    if (m_timeQueue.isEmpty()) {
+        emit downloadFinished(
+            true,
+            "Brak kolejnych terminów do pobrania."
+            );
+
+        return;
+    }
+
+    if (m_username.isEmpty() || m_password.isEmpty()) {
+        if (!loadCredentials()) {
+            const QString message =
+                "Nie udało się wczytać danych logowania.";
+
+            handleDownloadFailure(
+                m_timeQueue.dequeue(),
+                m_initialLoadPending,
+                message
+                );
+
+            return;
+        }
+    }
+
+    processCurrentDownload();
+}
+
+
+
+void CopernicusManager::handleDownloadFailure(
+    const QDateTime &time,
+    bool isInitialLoad,
+    const QString &message)
+{
+    setDownloading(false);
+
+    emit logMessage(message);
+
+    if (isInitialLoad) {
+        m_initialLoadPending = false;
+        m_timeQueue.clear();
+
+        emit initialSurfaceDataLoaded(
+            false,
+            message
+            );
+    } else {
+        m_timeQueue.prepend(time);
+
+        emit surfaceDataLoaded(
+            time,
+            false,
+            message
+            );
+    }
+
+    emit downloadFinished(
+        false,
+        message
+        );
+}
+
+
+
+void CopernicusManager::processCurrentDownload()
+{
+    if (m_timeQueue.isEmpty()) {
+        setDownloading(false);
+
+        emit downloadFinished(
+            true,
+            "Wszystkie terminy zostały przetworzone."
+            );
+
+        return;
+    }
+
+    const QDateTime dt = m_timeQueue.dequeue();
+
+    const bool isInitialLoad = m_initialLoadPending;
+
+    const QString timeFormatted =
+        dt.toString("yyyy-MM-dd'T'HH:mm:ss");
+
+    const QString fileSuffix =
+        dt.toString("yyyyMMdd_HHmmss");
+
+
+    const QString outputFileName =
+        QString("surface_%1").arg(fileSuffix);
+
+    const QString appDir =
+        QCoreApplication::applicationDirPath();
+
+    const QString outputBasePath =
+        QDir(appDir).filePath(outputFileName);
+
+    QFile::remove(outputBasePath);
+    QFile::remove(outputBasePath + ".csv");
 
     QStringList args;
+
     args << "subset"
          << "--username" << m_username
          << "--password" << m_password
-         << "-i" << "cmems_mod_glo_phy_anfc_merged-uv_PT1H-i"
-         << "-v" << "utotal"
-         << "-v" << "vtotal"
-         << "-t" << timeFormatted
-         << "-T" << timeFormatted
-         << "-x" << "-11"
-         << "-X" << "44"
-         << "-y" << "30"
-         << "-Y" << "72"
-         << "-z" << "0.49402499198913574"
-         << "-Z" << "0.49402499198913574"
+
+         << "--dataset-id"
+         << "cmems_mod_glo_phy_anfc_merged-uv_PT1H-i"
+
+         << "--variable" << "utotal"
+         << "--variable" << "vtotal"
+
+         << "--start-datetime" << timeFormatted
+         << "--end-datetime" << timeFormatted
+
+
+         << "--minimum-longitude" << "-11.0"
+         << "--maximum-longitude" << "42.4"
+
+         << "--minimum-latitude" << "29.9"
+         << "--maximum-latitude" << "71.8"
+
+         << "--minimum-depth" << kSurfaceDepth
+         << "--maximum-depth" << kSurfaceDepth
+
+         << "--coordinates-selection-method"
+         << "outside"
+
          << "--file-format" << "csv"
-         << "-f" << outputFileName
+         << "--output-directory" << appDir
+         << "--output-filename" << outputFileName
          << "--overwrite";
 
-    QProcess *process = new QProcess(this);
+    auto *process = new QProcess(this);
 
-    connect(process, &QProcess::readyReadStandardOutput, [this, process]() {
-        emit logMessage(QString::fromUtf8(process->readAllStandardOutput()));
-    });
+    process->setWorkingDirectory(appDir);
 
-    connect(process, &QProcess::readyReadStandardError, [this, process]() {
-        emit logMessage(QString::fromUtf8(process->readAllStandardError()));
-    });
+    connect(
+        process,
+        &QProcess::readyReadStandardOutput,
+        this,
+        [this, process]() {
+            emit logMessage(
+                QString::fromUtf8(
+                    process->readAllStandardOutput()
+                    )
+                );
+        }
+        );
 
-    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            [=](int exitCode, QProcess::ExitStatus exitStatus) {
+    connect(
+        process,
+        &QProcess::readyReadStandardError,
+        this,
+        [this, process]() {
+            emit logMessage(
+                QString::fromUtf8(
+                    process->readAllStandardError()
+                    )
+                );
+        }
+        );
 
-                qDebug() << "Proces zakończony!";
-                qDebug() << "Kod wyjścia:" << exitCode;
-                qDebug() << "Status:" << exitStatus;
-                qDebug() << "Błąd procesu:" << process->errorString();
+    setDownloading(true);
 
-                process->deleteLater();
+    emit logMessage(
+        QString("Pobieranie danych dla: %1")
+            .arg(timeFormatted)
+        );
 
-                if (exitCode == 0) {
-                    m_completedTasks++;
-                    int progressPercent = static_cast<int>((static_cast<double>(m_completedTasks) / m_totalTasks) * 100);
-                    setProgress(progressPercent);
-                    processNextInQueue();
-                } else {
+    const QString exePath =
+        QDir(appDir).filePath("copernicusmarine.exe");
+\
+    auto processHandled =
+        std::make_shared<bool>(false);
+
+    connect(
+        process,
+        &QProcess::errorOccurred,
+        this,
+        [this, process, dt, isInitialLoad, processHandled](
+            QProcess::ProcessError error) {
+
+            if (error != QProcess::FailedToStart) {
+                emit logMessage(
+                    "Błąd procesu: " + process->errorString()
+                    );
+
+                return;
+            }
+
+            if (*processHandled) {
+                return;
+            }
+
+            *processHandled = true;
+
+            const QString message =
+                "Nie można uruchomić copernicusmarine.exe: "
+                + process->errorString();
+
+            handleDownloadFailure(
+                dt,
+                isInitialLoad,
+                message
+                );
+
+            process->deleteLater();
+        }
+        );
+
+    connect(
+        process,
+        QOverload<int, QProcess::ExitStatus>::of(
+            &QProcess::finished
+            ),
+        this,
+        [this, process, dt, timeFormatted,
+         outputBasePath, isInitialLoad, processHandled](
+            int exitCode,
+            QProcess::ExitStatus exitStatus) {
+
+            Q_UNUSED(exitStatus);
+
+            if (*processHandled) {
+                return;
+            }
+
+            *processHandled = true;
+
+            process->deleteLater();
+
+            if (exitCode != 0) {
+                handleDownloadFailure(
+                    dt,
+                    isInitialLoad,
+                    QString(
+                        "Pobieranie nie powiodło się dla %1. "
+                        "Kod wyjścia: %2."
+                        ).arg(timeFormatted).arg(exitCode)
+                    );
+
+                return;
+            }
+
+            QString actualPath = outputBasePath;
+
+            if (!QFile::exists(actualPath) &&
+                QFile::exists(outputBasePath + ".csv")) {
+
+                actualPath += ".csv";
+            }
+
+            if (!QFile::exists(actualPath)) {
+                handleDownloadFailure(
+                    dt,
+                    isInitialLoad,
+                    "Copernicus zakończył pobieranie, ale nie "
+                    "znaleziono pliku CSV: " + outputBasePath
+                    );
+
+                return;
+            }
+            qDebug() << "[CSV] Istnieje:" << QFile::exists(actualPath);
+            qDebug() << "[CSV] Ścieżka:" << actualPath;
+            qDebug() << "[CSV] Rozmiar:"
+                     << QFileInfo(actualPath).size()
+                     << "bajtów";
+            emit logMessage(
+                QString("Pobrano %1. Rozpoczynam parsowanie w tle.")
+                    .arg(actualPath)
+                );
+
+
+            auto *watcher =
+                new QFutureWatcher<SurfaceParseResult>(this);
+
+            connect(
+                watcher,
+                &QFutureWatcher<SurfaceParseResult>::finished,
+                this,
+                [this, watcher, dt, timeFormatted,
+                 isInitialLoad]() {
+
+                    const SurfaceParseResult result =
+                        watcher->result();
+                    qDebug() << "[PARSER] Success:" << result.success;
+                    qDebug() << "[PARSER] Liczba punktów:"
+                             << result.data.points.size();
+                    qDebug() << "[PARSER] Błąd:"
+                             << result.error;
+
+                    watcher->deleteLater();
+
+                    if (!result.success) {
+                        handleDownloadFailure(
+                            dt,
+                            isInitialLoad,
+                            "Nie udało się sparsować CSV: "
+                                + result.error
+                            );
+
+                        return;
+                    }
+
+
+                    m_surfaceData = result.data;
+
                     setDownloading(false);
-                    emit downloadFinished(false, QString("Błąd podczas pobierania dla czasu: %1").arg(timeFormatted));
+
+                    m_completedTasks++;
+
+                    int progressPercent = 100;
+
+                    if (m_totalTasks > 0) {
+                        progressPercent =
+                            static_cast<int>(
+                                (static_cast<double>(
+                                     m_completedTasks
+                                     ) / m_totalTasks) * 100.0
+                                );
+                    }
+
+                    setProgress(progressPercent);
+
+                    emit logMessage(
+                        QString(
+                            "Wczytano %1 punktów dla %2."
+                            ).arg(
+                                m_surfaceData.points.size()
+                                ).arg(
+                                timeFormatted
+                                )
+                        );
+
+                    if (isInitialLoad) {
+                        m_initialLoadPending = false;
+
+                        emit initialSurfaceDataLoaded(
+                            true,
+                            QString(
+                                "Dane wczytane dla %1. "
+                                "Możesz wybrać punkt na mapie."
+                                ).arg(timeFormatted)
+                            );
+                    } else {
+                        emit surfaceDataLoaded(
+                            m_surfaceData.time,
+                            true,
+                            "Dane powierzchniowe zostały wczytane."
+                            );
+                    }
+
+
+                    if (m_timeQueue.isEmpty()) {
+                        emit downloadFinished(
+                            true,
+                            "Pobieranie i parsowanie zakończone."
+                            );
+                    } else {
+                        emit logMessage(
+                            QString(
+                                "Pozostało terminów: %1. "
+                                "Oczekiwanie na downloadNext()."
+                                ).arg(m_timeQueue.size())
+                            );
+                    }
                 }
-            });
+                );
 
-    emit logMessage(QString("Uruchamianie dla: %1").arg(timeFormatted));
+            const QString csvPath = actualPath;
 
-    QString exePath = QCoreApplication::applicationDirPath() + "/copernicusmarine.exe";
+            watcher->setFuture(
+                QtConcurrent::run([csvPath]() {
+
+                    SurfaceParseResult result;
+
+                    result.success =
+                        SurfaceCurrentParser::loadCsv(
+                            csvPath,
+                            result.data,
+                            &result.error
+                            );
+
+                    return result;
+                })
+                );
+        }
+        );
+
+    emit logMessage(
+        QString("Uruchamiam pobieranie: %1")
+            .arg(timeFormatted)
+        );
+
     process->start(exePath, args);
+}
+
+
+void CopernicusManager::checkLocation(
+    double latitude,
+    double longitude)
+{
+    if (m_isDownloading) {
+        emit locationCheckFinished(
+            false,
+            false,
+            "Poczekaj na zakończenie pobierania i parsowania."
+            );
+
+        return;
+    }
+
+    if (!std::isfinite(latitude) ||
+        !std::isfinite(longitude) ||
+        latitude < -90.0 ||
+        latitude > 90.0 ||
+        longitude < -180.0 ||
+        longitude > 180.0) {
+
+        emit locationCheckFinished(
+            false,
+            false,
+            "Nieprawidłowe współrzędne."
+            );
+
+        return;
+    }
+
+    if (m_surfaceData.points.isEmpty()) {
+        emit locationCheckFinished(
+            false,
+            false,
+            "Najpierw pobierz i wczytaj dane powierzchniowe."
+            );
+
+        return;
+    }
+
+    const SurfaceCurrentPoint *nearestPoint = nullptr;
+
+    double bestDistance =
+        std::numeric_limits<double>::max();
+
+    for (const SurfaceCurrentPoint &point
+         : m_surfaceData.points) {
+
+        const double deltaLat =
+            point.latitude - latitude;
+
+        const double deltaLon =
+            (point.longitude - longitude)
+            * qCos(qDegreesToRadians(latitude));
+
+        const double distance =
+            deltaLat * deltaLat
+            + deltaLon * deltaLon;
+
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            nearestPoint = &point;
+        }
+    }
+
+    if (nearestPoint == nullptr) {
+        emit locationCheckFinished(
+            false,
+            false,
+            "Nie znaleziono odpowiedniego punktu siatki."
+            );
+
+        return;
+    }
+
+    emit logMessage(
+        QString(
+            "Najbliższy punkt: lat=%1, lon=%2, "
+            "u=%3, v=%4, valid=%5"
+            )
+            .arg(nearestPoint->latitude, 0, 'f', 5)
+            .arg(nearestPoint->longitude, 0, 'f', 5)
+            .arg(nearestPoint->u)
+            .arg(nearestPoint->v)
+            .arg(nearestPoint->valid)
+        );
+
+    const bool isLand = !nearestPoint->valid;
+
+    if (isLand) {
+        emit locationCheckFinished(
+            true,
+            true,
+            "Lokalizacja znajduje się na lądzie."
+            );
+    } else {
+        emit locationCheckFinished(
+            true,
+            false,
+             "Lokalizacja znajduje się na wodzie."
+            );
+    }
 }
