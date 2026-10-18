@@ -13,10 +13,21 @@ ApplicationWindow {
     visible: true
     title: qsTr("Oil Simulation")
     property bool lightMode: Application.styleHints.colorScheme === Qt.Light
+    property bool checking: false
     property color reallyDark: "#1f1f1f"
     property color dark: "#262626"
     property color reallyLight: "#e7e7e7"
     property color light: "#e0e0e0"
+
+    Connections {
+        target: copernicusManager
+
+        function onLocationCheckFinished(success, isLand, message) {
+            console.log("locationCheckFinished:", success, isLand, message)
+            window.checking = false
+            !success ? rectangle1.showError(message, "red") : (isLand ? rectangle1.showError(message, "#c97a00") : rectangle1.showError(message, "#2e8b57"))
+        }
+    }
 
     GridLayout {
         id: grid
@@ -99,6 +110,7 @@ ApplicationWindow {
                     text: "Postaw"
                     Layout.fillWidth: true
                     Layout.topMargin: 4
+                    font.pixelSize: 11
                     padding: 10
 
                     background: Rectangle {
@@ -110,7 +122,7 @@ ApplicationWindow {
 
                     onClicked: {
                         if (latInput.text.trim() === "" || lonInput.text.trim() === "") {
-                            rectangle1.showError("Pola nie mogą być puste!")
+                            rectangle1.showError("Pola nie mogą być puste!", "red")
                             return
                         }
 
@@ -118,7 +130,7 @@ ApplicationWindow {
                         var longitude = Number(lonInput.text.replace(",", "."))
 
                         if (!isFinite(latitude) || !isFinite(longitude)) {
-                            rectangle1.showError("Podaj prawidłowe współrzędne!")
+                            rectangle1.showError("Podaj prawidłowe współrzędne!", "red")
                             return
                         }
 
@@ -126,12 +138,61 @@ ApplicationWindow {
                             latitude > mapMouseArea.northLimit ||
                             longitude < mapMouseArea.westLimit ||
                             longitude > mapMouseArea.eastLimit) {
-                            rectangle1.showError("Marker jest poza dozwolonym obszarem!")
+                            rectangle1.showError("Marker jest poza dozwolonym obszarem!", "red")
                             return
                         }
 
                         map.markerCoordinate = QtPositioning.coordinate(latitude, longitude)
                     }
+                }
+
+                Button {
+                    text: window.checking ? "Sprawdzanie..." : "Zatwierdź"
+                    enabled: !window.checking && !copernicusManager.isDownloading
+                    Layout.fillWidth: true
+                    Layout.topMargin: 4
+                    font.pixelSize: 11
+                    padding: 10
+
+                    background: Rectangle {
+                        radius: 6
+                        color: window.lightMode ? "white" : "#333333"
+                        border.color: window.lightMode ? "#cccccc" : "#444444"
+                        border.width: 1
+                    }
+
+                    onClicked: {
+                        console.log("Kliknięto Zatwierdź")
+
+                        if (map.markerCoordinate === null) {
+                            rectangle1.showError("Najpierw wybierz lokalizację!", "red")
+                            return
+                        }
+
+                        window.checking = true
+                        console.log("Marker:", map.markerCoordinate.latitude,
+                                        map.markerCoordinate.longitude)
+
+                        console.log("Data:", startDateInput.text)
+
+                        copernicusManager.checkLocation(
+                            map.markerCoordinate.latitude,
+                            map.markerCoordinate.longitude,
+                            startDateInput.text
+                        )
+
+                        console.log("Wywołano checkLocation")
+                    }
+                }
+
+                Label {
+                    id: locationStatus
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 11
+                    font.bold: true
+                    visible: text !== ""
                 }
 
                 Rectangle {
@@ -205,6 +266,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.topMargin: 4
                     Layout.bottomMargin: 4
+                    font.pixelSize: 11
                     padding: 10
                     background: Rectangle {
                         radius: 6
@@ -223,53 +285,8 @@ ApplicationWindow {
                 }
             }
 
-            Label {
-                id: errorMessage
-                text: ""
-                width: parent.width - 32
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 16
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                wrapMode: Text.WordWrap
-                color: "red"
-                font.pixelSize: 10
-                visible: false
-                opacity: 0
-            }
-
-            Timer {
-                id: errorTimer
-                interval: 2500
-                repeat: false
-                onTriggered: {
-                    errorFade.start()
-                }
-            }
-
-            NumberAnimation {
-                id: errorFade
-                target: errorMessage
-                property: "opacity"
-                to: 0
-                duration: 500
-                easing.type: Easing.InOutQuad
-
-                onFinished: {
-                    errorMessage.visible = false
-                }
-            }
-
-            function showError(message) {
-                errorFade.stop()
-                errorTimer.stop()
-
-                errorMessage.text = message
-                errorMessage.opacity = 1
-                errorMessage.visible = true
-
-                errorTimer.start()
+            function showError(message, color) {
+                errorToast.show(message, color)
             }
         }
 
@@ -446,11 +463,11 @@ ApplicationWindow {
                 Button {
                     id: zoomIn
                     text: "+"
-                    width: 30
-                    height: 30
+                    width: 24
+                    height: 24
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 42
+                    anchors.bottomMargin: 32
                     anchors.rightMargin: 8
 
                     onClicked: {
@@ -458,16 +475,30 @@ ApplicationWindow {
                     }
 
                     background: Rectangle {
-                        radius: 8
-                        color: window.lightMode ? window.light : window.dark
+                        topLeftRadius: 8
+                        topRightRadius: 8
+                        color: zoomIn.hovered
+                               ? (window.lightMode ? "#c8c8c8" : "#3a3a3a")
+                               : (window.lightMode ? window.light : window.dark)
                     }
+                }
+
+                Rectangle {
+                    id: zoomDivider
+                    width: 24 - 8
+                    height: 2
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8 + 4
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 32 - 1
+                    color: window.lightMode ? "#cccccc" : "#444444"
                 }
 
                 Button {
                     id: zoomOut
                     text: "−"
-                    width: 30
-                    height: 30
+                    width: 24
+                    height: 24
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 8
@@ -478,8 +509,11 @@ ApplicationWindow {
                     }
 
                     background: Rectangle {
-                        radius: 8
-                        color: window.lightMode ? window.light : window.dark
+                        bottomLeftRadius: 8
+                        bottomRightRadius: 8
+                        color: zoomOut.hovered
+                               ? (window.lightMode ? "#c8c8c8" : "#3a3a3a")
+                               : (window.lightMode ? window.light : window.dark)
                     }
                 }
 
@@ -488,11 +522,11 @@ ApplicationWindow {
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: "Przybliżenie: " + (map.targetZoom / 4).toFixed(1) + "x"
-                    anchors.right: parent.right
+                    text: "Zoom: " + (map.targetZoom / 4).toFixed(2) + "x"
+                    anchors.left: parent.left
                     anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 8
-                    anchors.rightMargin: 46
+                    anchors.bottomMargin: 40
+                    anchors.leftMargin: 10
                 }
 
                 Label {
@@ -500,7 +534,7 @@ ApplicationWindow {
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: "Sz.: " + map.center.latitude.toFixed(5)
+                    text: "Lat.: " + map.center.latitude.toFixed(5)
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 24
@@ -512,11 +546,84 @@ ApplicationWindow {
                     color: window.lightMode ? window.light : window.dark
                     font.pixelSize: 12
                     fontSizeMode: Text.Fit
-                    text: "Dł.: " + map.center.longitude.toFixed(5)
+                    text: "Lon.: " + map.center.longitude.toFixed(5)
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 8
                     anchors.leftMargin: 10
+                }
+            }
+
+            Rectangle {
+                id: errorToast
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 8
+
+                width: errorMessage.width + 46
+                height: Math.max(errorMessage.implicitHeight, 10) + 16
+
+                radius: 8
+                color: window.dark
+                visible: false
+                opacity: 0
+
+                function show(message, color) {
+                    errorFade.stop()
+                    errorTimer.stop()
+
+                    errorMessage.text = message
+                    statusDot.color = color
+                    errorToast.opacity = 1
+                    errorToast.visible = true
+
+                    errorTimer.start()
+                }
+
+                TextMetrics {
+                    id: textMetrics
+                    font: errorMessage.font
+                    text: errorMessage.text
+                }
+
+                Rectangle {
+                    id: statusDot
+                    width: 10
+                    height: 10
+                    radius: 5
+                    anchors.left: parent.left
+                    anchors.leftMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Label {
+                    id: errorMessage
+                    color: "white"
+                    anchors.left: statusDot.right
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(Math.ceil(textMetrics.advanceWidth) + 4,
+                                    Math.max(120, rectangle2.width - 200))
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignLeft
+                    font.pixelSize: 11
+                }
+
+                Timer {
+                    id: errorTimer
+                    interval: 2500
+                    repeat: false
+                    onTriggered: errorFade.start()
+                }
+
+                NumberAnimation {
+                    id: errorFade
+                    target: errorToast
+                    property: "opacity"
+                    to: 0
+                    duration: 500
+                    easing.type: Easing.InOutQuad
+                    onFinished: errorToast.visible = false
                 }
             }
         }
