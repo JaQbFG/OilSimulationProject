@@ -21,10 +21,15 @@ class CopernicusManager : public QObject {
 
         Q_INVOKABLE void startBatchDownload(const QString &startStr, const QString &endStr, int hoursStep = 1);
 
+        Q_INVOKABLE void checkLocation(double latitude,
+                                       double longitude,
+                                       const QString &timeStr);
+
     signals:
         void progressChanged();
         void isDownloadingChanged();
         void downloadFinished(bool success, QString message);
+        void locationCheckFinished(bool success, bool isLand, QString message);
         void logMessage(QString message);
 
     private:
@@ -39,6 +44,8 @@ class CopernicusManager : public QObject {
         bool m_isDownloading;
         QString m_username;
         QString m_password;
+
+        bool loadCredentials();
 };
 
 #endif // COPERNICUSMANAGER_H
