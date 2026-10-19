@@ -393,7 +393,13 @@ ApplicationWindow {
 
                 plugin: Plugin {
                     name: "osm"
+                    PluginParameter
+                    {
+                    name: "osm.mapping.custom.host"
+                    value: "https://tile.openstreetmap.org/"
+                    }
                 }
+                activeMapType: map.supportedMapTypes [map.supportedMapTypes.length-1]
 
                 center: QtPositioning.coordinate(50.0, 16.0)
 
