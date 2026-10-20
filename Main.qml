@@ -14,10 +14,15 @@ ApplicationWindow {
     title: qsTr("Oil Simulation")
     property bool lightMode: Application.styleHints.colorScheme === Qt.Light
     property bool checking: false
+
     property color reallyDark: "#1f1f1f"
     property color dark: "#262626"
     property color reallyLight: "#e7e7e7"
     property color light: "#e0e0e0"
+
+    property color error: "red"
+    property color warning: "#c97a00"
+    property color success: "#2e8b57"
 
     Connections {
         target: copernicusManager
@@ -25,7 +30,17 @@ ApplicationWindow {
         function onLocationCheckFinished(success, isLand, message) {
             console.log("locationCheckFinished:", success, isLand, message)
             window.checking = false
-            !success ? rectangle1.showError(message, "red") : (isLand ? rectangle1.showError(message, "#c97a00") : rectangle1.showError(message, "#2e8b57"))
+            !success ? rectangle1.showError(message, window.error) : (isLand ? rectangle1.showError(message, window.warning) : rectangle1.showError(message, window.success))
+        }
+
+        function onProgressChanged() {
+            if (copernicusManager.isDownloading)
+                errorToast.showBusy("Pobieranie danych... " + copernicusManager.progress + "%", true)
+        }
+
+        function onDownloadFinished(success, message) {
+            console.log("Download:", success, message)
+            errorToast.show(message, success ? widnow.success : window.error)
         }
     }
 
@@ -122,7 +137,7 @@ ApplicationWindow {
 
                     onClicked: {
                         if (latInput.text.trim() === "" || lonInput.text.trim() === "") {
-                            rectangle1.showError("Pola nie mogą być puste!", "red")
+                            rectangle1.showError("Pola nie mogą być puste!", window.error)
                             return
                         }
 
@@ -130,7 +145,7 @@ ApplicationWindow {
                         var longitude = Number(lonInput.text.replace(",", "."))
 
                         if (!isFinite(latitude) || !isFinite(longitude)) {
-                            rectangle1.showError("Podaj prawidłowe współrzędne!", "red")
+                            rectangle1.showError("Podaj prawidłowe współrzędne!", window.error)
                             return
                         }
 
@@ -138,7 +153,7 @@ ApplicationWindow {
                             latitude > mapMouseArea.northLimit ||
                             longitude < mapMouseArea.westLimit ||
                             longitude > mapMouseArea.eastLimit) {
-                            rectangle1.showError("Marker jest poza dozwolonym obszarem!", "red")
+                            rectangle1.showError("Marker jest poza dozwolonym obszarem!", window.error)
                             return
                         }
 
@@ -165,11 +180,12 @@ ApplicationWindow {
                         console.log("Kliknięto Zatwierdź")
 
                         if (map.markerCoordinate === null) {
-                            rectangle1.showError("Najpierw wybierz lokalizację!", "red")
+                            rectangle1.showError("Najpierw wybierz lokalizację!", window.error)
                             return
                         }
 
                         window.checking = true
+                        errorToast.showBusy("Sprawdzanie lokalizacji...", false)
                         console.log("Marker:", map.markerCoordinate.latitude,
                                         map.markerCoordinate.longitude)
 
@@ -262,7 +278,7 @@ ApplicationWindow {
                 Button {
                     id: downloadButton
                     text: copernicusManager.isDownloading ? "Pobieranie..." : "Pobierz pliki CSV"
-                    enabled: !copernicusManager.isDownloading
+                    enabled: !copernicusManager.isDownloading && !window.checking
                     Layout.fillWidth: true
                     Layout.topMargin: 4
                     Layout.bottomMargin: 4
@@ -275,13 +291,9 @@ ApplicationWindow {
                         border.width: 1
                     }
                     onClicked: {
+                        errorToast.showBusy("Pobieranie danych... 0%", true)
                         copernicusManager.startBatchDownload(startDateInput.text, endDateInput.text, 1)
                     }
-                }
-
-                ProgressBar {
-                    Layout.fillWidth: true
-                    value: copernicusManager.progress / 100.0
                 }
             }
 
@@ -560,8 +572,11 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 8
 
-                width: errorMessage.width + 38
-                height: Math.max(errorMessage.implicitHeight, 10) + 12
+                property bool busy: false
+                property bool showProgress: false
+
+                width: Math.max(errorMessage.width + 34)
+                height: Math.max(errorMessage.implicitHeight, 14) + 12 + (showProgress ? 9 : 0)
 
                 radius: 8
                 color: window.dark
@@ -572,6 +587,8 @@ ApplicationWindow {
                     errorFade.stop()
                     errorTimer.stop()
 
+                    busy = false
+                    showProgress = false
                     errorMessage.text = message
                     statusDot.color = color
                     errorToast.opacity = 1
@@ -580,33 +597,120 @@ ApplicationWindow {
                     errorTimer.start()
                 }
 
+                function showBusy(message, withProgress) {
+                    errorFade.stop()
+                    errorTimer.stop()
+
+                    busy = true
+                    showProgress = withProgress === true
+                    errorMessage.text = message
+                    errorToast.opacity = 1
+                    errorToast.visible = true
+                }
+
                 TextMetrics {
                     id: textMetrics
                     font: errorMessage.font
                     text: errorMessage.text
                 }
 
-                Rectangle {
-                    id: statusDot
-                    width: 10
-                    height: 10
-                    radius: 5
+                Item {
+                    id: indicator
+                    width: 14
+                    height: 14
                     anchors.left: parent.left
-                    anchors.leftMargin: 12
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: 8
+                    anchors.top: parent.top
+                    anchors.topMargin: 6.5
+
+                    Rectangle {
+                        id: statusDot
+                        width: 10
+                        height: 10
+                        radius: 5
+                        anchors.centerIn: parent
+                        visible: !errorToast.busy
+                    }
+
+                    Item {
+                        id: spinner
+                        anchors.fill: parent
+                        visible: errorToast.busy
+
+                        Canvas {
+                            anchors.fill: parent
+                            antialiasing: true
+
+                            onPaint: {
+                                var ctx = getContext("2d")
+                                ctx.reset()
+                                ctx.lineWidth = 2
+                                ctx.lineCap = "round"
+
+                                var cx = width / 2
+                                var cy = height / 2
+                                var r = width / 2 - 1.5
+
+                                ctx.strokeStyle = "rgba(255, 255, 255, 0.2)"
+                                ctx.beginPath()
+                                ctx.arc(cx, cy, r, 0, Math.PI * 2)
+                                ctx.stroke()
+
+                                ctx.strokeStyle = "white"
+                                ctx.beginPath()
+                                ctx.arc(cx, cy, r, 0, Math.PI * 0.75)
+                                ctx.stroke()
+                            }
+                        }
+
+                        RotationAnimator {
+                            target: spinner
+                            from: 0
+                            to: 360
+                            duration: 800
+                            loops: Animation.Infinite
+                            running: errorToast.busy && errorToast.visible
+                        }
+                    }
                 }
 
                 Label {
                     id: errorMessage
                     color: "white"
-                    anchors.left: statusDot.right
-                    anchors.leftMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: indicator.right
+                    anchors.leftMargin: 6
+                    anchors.top: parent.top
+                    anchors.topMargin: 6
                     width: Math.min(Math.ceil(textMetrics.advanceWidth) + 4,
                                     Math.max(120, rectangle2.width - 200))
                     wrapMode: Text.WordWrap
                     horizontalAlignment: Text.AlignLeft
                     font.pixelSize: 11
+                }
+
+                Rectangle {
+                    id: progressTrack
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.leftMargin: 6
+                    anchors.rightMargin: 6
+                    anchors.bottomMargin: 6
+                    height: 3
+                    radius: 1.5
+                    color: "#444444"
+                    visible: errorToast.showProgress
+
+                    Rectangle {
+                        height: parent.height
+                        radius: parent.radius
+                        width: parent.width * Math.min(1, copernicusManager.progress / 100.0)
+                        color: "#2e8b57"
+
+                        Behavior on width {
+                            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+                        }
+                    }
                 }
 
                 Timer {
