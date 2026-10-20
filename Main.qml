@@ -14,6 +14,9 @@ ApplicationWindow {
     title: qsTr("Oil Simulation")
     property bool lightMode: Application.styleHints.colorScheme === Qt.Light
     property bool checking: false
+    property bool datesLocked: false
+    property bool loadingInitialData: false
+    property bool initialDataLoaded: false
     property color reallyDark: "#1f1f1f"
     property color dark: "#262626"
     property color reallyLight: "#e7e7e7"
@@ -26,6 +29,38 @@ ApplicationWindow {
             console.log("locationCheckFinished:", success, isLand, message)
             window.checking = false
             !success ? rectangle1.showError(message, "red") : (isLand ? rectangle1.showError(message, "#c97a00") : rectangle1.showError(message, "#2e8b57"))
+        }
+        function onInitialSurfaceDataLoaded(success, message) {
+            console.log(
+                "[INITIAL DATA]",
+                "success =", success,
+                "message =", message
+            )
+
+            window.loadingInitialData = false
+
+            if (!success) {
+                window.datesLocked = false
+                window.initialDataLoaded = false
+
+                rectangle1.showError(message, "red")
+                return
+            }
+
+            window.datesLocked = true
+            window.initialDataLoaded = true
+
+            console.log(
+                "[INITIAL DATA] Gotowe. Można wybierać punkt."
+            )
+
+            rectangle1.showError(
+                message,
+                "#2e8b57"
+            )
+        }
+        function onLogMessage(message) {
+            console.log("[CopernicusManager]", message)
         }
     }
 
@@ -73,6 +108,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         font.pixelSize: 11
                         padding: 8
+                        enabled: window.initialDataLoaded
                         background: Rectangle {
                             radius: 6
                             color: window.lightMode ? "white" : "#111111"
@@ -97,6 +133,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         font.pixelSize: 11
                         padding: 8
+                        enabled: window.initialDataLoaded
                         background: Rectangle {
                             radius: 6
                             color: window.lightMode ? "white" : "#111111"
@@ -112,7 +149,7 @@ ApplicationWindow {
                     Layout.topMargin: 4
                     font.pixelSize: 11
                     padding: 10
-
+                    enabled: window.initialDataLoaded
                     background: Rectangle {
                         radius: 6
                         color: window.lightMode ? "white" : "#333333"
@@ -147,8 +184,10 @@ ApplicationWindow {
                 }
 
                 Button {
-                    text: window.checking ? "Sprawdzanie..." : "Zatwierdź"
-                    enabled: !window.checking && !copernicusManager.isDownloading
+                    text: window.checking ? "Sprawdzanie..." : "Sprawdź punkt"
+                    enabled: window.initialDataLoaded
+                             && !window.checking
+                             && !copernicusManager.isDownloading
                     Layout.fillWidth: true
                     Layout.topMargin: 4
                     font.pixelSize: 11
@@ -177,8 +216,7 @@ ApplicationWindow {
 
                         copernicusManager.checkLocation(
                             map.markerCoordinate.latitude,
-                            map.markerCoordinate.longitude,
-                            startDateInput.text
+                            map.markerCoordinate.longitude
                         )
 
                         console.log("Wywołano checkLocation")
@@ -226,6 +264,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         font.pixelSize: 11
                         padding: 8
+                        enabled: !window.datesLocked && !window.loadingInitialData
                         background: Rectangle {
                             radius: 6
                             color: window.lightMode ? "white" : "#111111"
@@ -249,6 +288,7 @@ ApplicationWindow {
                         placeholderText: "np. 2026-10-11T23:00:00"
                         Layout.fillWidth: true
                         font.pixelSize: 11
+                        enabled: !window.datesLocked && !window.loadingInitialData
                         padding: 8
                         background: Rectangle {
                             radius: 6
@@ -261,21 +301,68 @@ ApplicationWindow {
 
                 Button {
                     id: downloadButton
-                    text: copernicusManager.isDownloading ? "Pobieranie..." : "Pobierz pliki CSV"
-                    enabled: !copernicusManager.isDownloading
+
+                    text: window.loadingInitialData
+                          ? "Pobieranie i wczytywanie..."
+                          : window.initialDataLoaded
+                            ? "Dane gotowe"
+                            : "Zatwierdź daty i pobierz pierwszy plik"
+
+                    enabled: !window.loadingInitialData
+                             && !window.initialDataLoaded
+                             && !copernicusManager.isDownloading
+
                     Layout.fillWidth: true
                     Layout.topMargin: 4
                     Layout.bottomMargin: 4
+
                     font.pixelSize: 11
                     padding: 10
+
                     background: Rectangle {
                         radius: 6
                         color: window.lightMode ? "white" : "#333333"
                         border.color: window.lightMode ? "#cccccc" : "#444444"
                         border.width: 1
                     }
+
                     onClicked: {
-                        copernicusManager.startBatchDownload(startDateInput.text, endDateInput.text, 1)
+                        var startText = startDateInput.text.trim()
+                        var endText = endDateInput.text.trim()
+
+                        var pattern =
+                            /^\d{4}-\d{2}-\d{2}T\d{2}:00:00$/
+
+                        if (!pattern.test(startText) ||
+                            !pattern.test(endText)) {
+                            rectangle1.showError(
+                                "Podaj daty w formacie YYYY-MM-DDTHH:00:00.",
+                                "red"
+                            )
+                            return
+                        }
+
+                        var startMs = Date.parse(startText)
+                        var endMs = Date.parse(endText)
+
+                        if (!isFinite(startMs) ||
+                            !isFinite(endMs) ||
+                            startMs > endMs) {
+                            rectangle1.showError(
+                                "Nieprawidłowy zakres dat.",
+                                "red"
+                            )
+                            return
+                        }
+
+                        window.datesLocked = true
+                        window.loadingInitialData = true
+
+                        copernicusManager.prepareSurfaceData(
+                            startText,
+                            endText,
+                            1
+                        )
                     }
                 }
 
@@ -306,7 +393,13 @@ ApplicationWindow {
 
                 plugin: Plugin {
                     name: "osm"
+                    PluginParameter
+                    {
+                    name: "osm.mapping.custom.host"
+                    value: "https://tile.openstreetmap.org/"
+                    }
                 }
+                activeMapType: map.supportedMapTypes [map.supportedMapTypes.length-1]
 
                 center: QtPositioning.coordinate(50.0, 16.0)
 
@@ -452,10 +545,30 @@ ApplicationWindow {
 
                     onReleased:(mouse)=> {
                         if (!hasDragged) {
+                           if (!window.initialDataLoaded) {
+                               rectangle1.showError(
+                                   "Najpierw zatwierdź daty i pobierz dane.",
+                                   "red"
+                               )
+                               return
+                           }
                             var coordinate = map.toCoordinate(Qt.point(mouse.x, mouse.y))
-                            if (isInsideBounds(coordinate)){
-                                map.markerCoordinate = coordinate
-                            }
+                                       console.log(
+                                           "[MAP] Kliknięto:",
+                                           coordinate.latitude,
+                                           coordinate.longitude
+                                       )
+
+                                       if (isInsideBounds(coordinate)) {
+                                           map.markerCoordinate = coordinate
+
+                                           console.log("[MAP] Ustawiono marker")
+                                       } else {
+                                           rectangle1.showError(
+                                               "Kliknięty punkt jest poza dozwolonym obszarem mapy.",
+                                               "#c97a00"
+                                           )
+                                       }
                         }
                     }
                 }
