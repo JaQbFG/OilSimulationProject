@@ -12,6 +12,7 @@ ApplicationWindow {
     minimumHeight: 250
     visible: true
     title: qsTr("Oil Simulation")
+    property real lastLoggedTime: -1
     property bool lightMode: Application.styleHints.colorScheme === Qt.Light
     property bool checking: false
     
@@ -34,7 +35,27 @@ ApplicationWindow {
         function onLocationCheckFinished(success, isLand, message) {
             console.log("locationCheckFinished:", success, isLand, message)
             window.checking = false
-            !success ? rectangle1.showError(message, window.error) : (isLand ? rectangle1.showError(message, window.warning) : rectangle1.showError(message, window.success))
+
+            if (!success) {
+                rectangle1.showError(message, window.error)
+                return
+            }
+
+            if (isLand) {
+                // na lądzie nie startujemy symulacji
+                rectangle1.showError(message, window.warning)
+                return
+            }
+
+            // woda: zatwierdź punkt i uruchom symulację od nowa
+            rectangle1.showError("Punkt zatwierdzony. Start symulacji.", window.success)
+
+            oilSimulation.reset()
+            oilSimulation.spillLatitude = map.markerCoordinate.latitude
+            oilSimulation.spillLongitude = map.markerCoordinate.longitude
+            oilSimulation.timeStep = 900   // 15 min per step
+            oilSimulation.releaseRate = 60 // optional: 1 particle/min, keeps the log readable
+            oilSimulation.start()
         }
 
         function onProgressChanged() {
@@ -44,7 +65,7 @@ ApplicationWindow {
 
         function onDownloadFinished(success, message) {
             console.log("Download:", success, message)
-            errorToast.show(message, success ? widnow.success : window.error)
+            errorToast.show(message, success ? window.success : window.error)
         }
         function onInitialSurfaceDataLoaded(success, message) {
             console.log(
@@ -77,6 +98,37 @@ ApplicationWindow {
         }
         function onLogMessage(message) {
             console.log("[CopernicusManager]", message)
+        }
+
+    }
+    Connections {
+        target: oilSimulation
+
+        function onStepped() {
+            var t = oilSimulation.elapsedSeconds
+
+            if (t === 0) {            // after reset()
+                window.lastLoggedTime = -1
+                return
+            }
+
+            if (t - window.lastLoggedTime < 900)
+                return
+
+            window.lastLoggedTime = t
+
+            var list = oilSimulation.particlePositions()
+            var states = ["pływa", "osiadła", "poza obszarem"]
+            var maxLogged = 20   // raise this to see more particles
+
+            console.log("=== t =", Math.round(t / 60), "min | cząsteczek:", list.length)
+
+            for (var i = 0; i < Math.min(list.length, maxLogged); i++) {
+                console.log("  #" + i,
+                            list[i].lat.toFixed(5),
+                            list[i].lon.toFixed(5),
+                            states[list[i].state])
+            }
         }
     }
 

@@ -20,6 +20,8 @@ public:
 
     int progress() const;
     bool isDownloading() const;
+    const SurfaceCurrentData &surfaceData() const { return m_surfaceData; }
+    bool hasPending() const { return !m_timeQueue.isEmpty(); }
 
     Q_INVOKABLE void prepareSurfaceData(
         const QString &startStr,
