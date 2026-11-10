@@ -15,6 +15,8 @@ ApplicationWindow {
     property real lastLoggedTime: -1
     property bool lightMode: Application.styleHints.colorScheme === Qt.Light
     property bool checking: false
+    property bool pointChecked: false
+    property bool pointConfirmed: false
     
     property bool datesLocked: false
     property bool loadingInitialData: false
@@ -37,25 +39,20 @@ ApplicationWindow {
             window.checking = false
 
             if (!success) {
+                window.pointChecked = false
                 rectangle1.showError(message, window.error)
                 return
             }
 
             if (isLand) {
-                // na lądzie nie startujemy symulacji
+                window.pointChecked = false
                 rectangle1.showError(message, window.warning)
                 return
             }
 
-            // woda: zatwierdź punkt i uruchom symulację od nowa
-            rectangle1.showError("Punkt zatwierdzony. Start symulacji.", window.success)
-
-            oilSimulation.reset()
-            oilSimulation.spillLatitude = map.markerCoordinate.latitude
-            oilSimulation.spillLongitude = map.markerCoordinate.longitude
-            oilSimulation.timeStep = 900   // 15 min per step
-            oilSimulation.releaseRate = 60 // optional: 1 particle/min, keeps the log readable
-            oilSimulation.start()
+            window.pointChecked = true
+            locationStatus.text = "Wybrano wodę. Potwierdź punkt."
+            rectangle1.showError("Punkt znajduje się na wodzie.", window.success)
         }
 
         function onProgressChanged() {
@@ -99,6 +96,34 @@ ApplicationWindow {
         function onLogMessage(message) {
             console.log("[CopernicusManager]", message)
         }
+        function onBathymetryLoaded(success, seabedDepth, message) {
+            if (!success) {
+                locationStatus.text = "Nie udało się pobrać batymetrii."
+                rectangle1.showError(message, window.error)
+                return
+            }
+            locationStatus.text = "Głębokość dna: " + seabedDepth.toFixed(2) + " m"
+        }
+
+        function onUnderwaterDataLoaded(time, success, message) {
+            if (!success) {
+                rectangle1.showError(message, window.error)
+                return
+            }
+            if (window.pointConfirmed)
+                return
+            window.pointConfirmed = true
+            rectangle1.showError("Punkt potwierdzony. Start symulacji.", window.success)
+
+            oilSimulation.reset()
+            oilSimulation.spillLatitude = map.markerCoordinate.latitude
+            oilSimulation.spillLongitude = map.markerCoordinate.longitude
+            oilSimulation.timeStep = 450 //how often positions get updated
+            oilSimulation.releaseRate = 60 //seconds for 1 particle
+            oilSimulation.releaseDepth = copernicusManager.seabedDepth()
+            oilSimulation.riseSpeed = 0.2 //how fast the oil rises
+            oilSimulation.start()
+        }
 
     }
     Connections {
@@ -107,7 +132,7 @@ ApplicationWindow {
         function onStepped() {
             var t = oilSimulation.elapsedSeconds
 
-            if (t === 0) {            // after reset()
+            if (t === 0) {
                 window.lastLoggedTime = -1
                 return
             }
@@ -119,7 +144,7 @@ ApplicationWindow {
 
             var list = oilSimulation.particlePositions()
             var states = ["pływa", "osiadła", "poza obszarem"]
-            var maxLogged = 20   // raise this to see more particles
+            var maxLogged = 20//logged particles
 
             console.log("=== t =", Math.round(t / 60), "min | cząsteczek:", list.length)
 
@@ -127,8 +152,18 @@ ApplicationWindow {
                 console.log("  #" + i,
                             list[i].lat.toFixed(5),
                             list[i].lon.toFixed(5),
-                            states[list[i].state])
+                            states[list[i].state],
+                            list[i].depth.toFixed(1) + " m")
             }
+        }
+    }
+    Connections {
+        target: oilSimulation
+        function onParticleEvent(id, lat, lon, simSeconds, timeUtc, state) {
+            console.log("Cząsteczka #" + id,
+                        state === 1 ? "osiadła na brzegu" : "opuściła obszar",
+                        "| lat", lat.toFixed(5), "lon", lon.toFixed(5),
+                        "|", timeUtc, "UTC | t =", Math.round(simSeconds / 60), "min")
         }
     }
 
@@ -217,7 +252,7 @@ ApplicationWindow {
                     Layout.topMargin: 4
                     font.pixelSize: 11
                     padding: 10
-                    enabled: window.initialDataLoaded
+                    enabled: window.initialDataLoaded && !window.pointConfirmed
                     background: Rectangle {
                         radius: 6
                         color: window.lightMode ? "white" : "#333333"
@@ -252,10 +287,11 @@ ApplicationWindow {
                 }
 
                 Button {
-                    text: window.checking ? "Sprawdzanie..." : "Sprawdź punkt"
+                    text: window.checking ? "Sprawdzanie..." : window.pointConfirmed ? "Punkt potwierdzony" : window.pointChecked ? "Potwierdź punkt" : "Sprawdź punkt"
                     enabled: window.initialDataLoaded
                              && !window.checking
                              && !copernicusManager.isDownloading
+                             && !window.pointConfirmed
                     Layout.fillWidth: true
                     Layout.topMargin: 4
                     font.pixelSize: 11
@@ -275,20 +311,19 @@ ApplicationWindow {
                             rectangle1.showError("Najpierw wybierz lokalizację!", window.error)
                             return
                         }
+                        if (window.pointChecked) {
+                            locationStatus.text = "Pobieranie batymetrii..."
+                            copernicusManager.prepareUnderwaterData(
+                                map.markerCoordinate.latitude, map.markerCoordinate.longitude,
+                                startDateInput.text, endDateInput.text)
+                        } else {
+                            window.checking = true
+                            errorToast.showBusy("Sprawdzanie lokalizacji...", false)
+                            copernicusManager.checkLocation(
+                                map.markerCoordinate.latitude, map.markerCoordinate.longitude)
+                        }
 
-                        window.checking = true
-                        errorToast.showBusy("Sprawdzanie lokalizacji...", false)
-                        console.log("Marker:", map.markerCoordinate.latitude,
-                                        map.markerCoordinate.longitude)
 
-                        console.log("Data:", startDateInput.text)
-
-                        copernicusManager.checkLocation(
-                            map.markerCoordinate.latitude,
-                            map.markerCoordinate.longitude
-                        )
-
-                        console.log("Wywołano checkLocation")
                     }
                 }
 
@@ -498,6 +533,8 @@ ApplicationWindow {
                         latInput.text = markerCoordinate.latitude.toFixed(5)
                         lonInput.text = markerCoordinate.longitude.toFixed(5)
                     }
+                    window.pointChecked = false
+                    locationStatus.text = ""
                 }
 
                 MapQuickItem {
@@ -610,6 +647,7 @@ ApplicationWindow {
 
                     onReleased:(mouse)=> {
                         if (!hasDragged) {
+                            if (window.pointConfirmed) return
                            if (!window.initialDataLoaded) {
                                rectangle1.showError(
                                    "Najpierw zatwierdź daty i pobierz dane.",

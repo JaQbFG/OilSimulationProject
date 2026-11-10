@@ -33,6 +33,11 @@ qt_add_qml_module(appOilSpillProject
         currentfield.cpp
         oilsimulation.h
         oilsimulation.cpp
+        oceanparsers.h
+        oceanparsers.cpp
+        copernicusmanager_underwater.cpp
+        underwaterfield.h
+        underwaterfield.cpp
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.

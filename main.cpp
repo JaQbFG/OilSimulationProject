@@ -12,7 +12,6 @@ int main(int argc, char *argv[]) {
     CopernicusManager copernicusManager;
     OilSimulation oilSimulation;
 
-    // every loaded file (first one and all following) goes into the simulation
     QObject::connect(&copernicusManager, &CopernicusManager::initialSurfaceDataLoaded,
                      &oilSimulation,
                      [&](bool success, const QString &) {
@@ -27,7 +26,6 @@ int main(int argc, char *argv[]) {
                              oilSimulation.setCurrentData(copernicusManager.surfaceData());
                      });
 
-    // simulation used up its hour: fetch the next one, or finish
     QObject::connect(&oilSimulation, &OilSimulation::dataExhausted,
                      &copernicusManager,
                      [&]() {
@@ -35,6 +33,13 @@ int main(int argc, char *argv[]) {
                              copernicusManager.downloadNext();
                          else
                              oilSimulation.stop();
+                     });
+
+    QObject::connect(&copernicusManager, &CopernicusManager::underwaterDataLoaded,
+                     &oilSimulation,
+                     [&](QDateTime, bool success, const QString &) {
+                         if (success)
+                             oilSimulation.setUnderwaterData(copernicusManager.underwaterData());
                      });
     engine.rootContext()->setContextProperty("copernicusManager", &copernicusManager);
     engine.rootContext()->setContextProperty("oilSimulation", &oilSimulation);

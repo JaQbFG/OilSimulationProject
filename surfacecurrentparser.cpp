@@ -4,7 +4,7 @@
 #include <QTextStream>
 #include <QStringList>
 #include <QtMath>
-
+#include <QTimeZone>
 #include <cmath>
 using namespace std;
 
@@ -68,6 +68,7 @@ bool SurfaceCurrentParser::loadCsv(
             );
 
         if (!pointTime.isValid()) {
+
             if (errorMessage) {
                 *errorMessage = QString(
                                     "Nieprawidłowy czas w wierszu %1."
@@ -76,6 +77,7 @@ bool SurfaceCurrentParser::loadCsv(
 
             return false;
         }
+        pointTime.setTimeZone(QTimeZone::utc());
 
         bool depthOk = false;
 

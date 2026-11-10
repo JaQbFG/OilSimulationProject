@@ -5,7 +5,7 @@
 #include <QString>
 #include <QDateTime>
 #include <QQueue>
-
+#include <functional>
 #include "OceanData.h"
 
 class CopernicusManager : public QObject
@@ -22,6 +22,15 @@ public:
     bool isDownloading() const;
     const SurfaceCurrentData &surfaceData() const { return m_surfaceData; }
     bool hasPending() const { return !m_timeQueue.isEmpty(); }
+    const UnderwaterCurrentData &underwaterData() const { return m_underwaterData; }
+    const BathymetryData &bathymetryData() const { return m_bathymetryData; }
+
+    Q_INVOKABLE double seabedDepth() const { return m_seabedDepth; }
+    Q_INVOKABLE double seabedDepthAt(double latitude, double longitude) const;
+
+    Q_INVOKABLE void prepareUnderwaterData(
+        double latitude, double longitude,
+        const QString &startStr, const QString &endStr);
 
     Q_INVOKABLE void prepareSurfaceData(
         const QString &startStr,
@@ -69,6 +78,8 @@ signals:
         bool success,
         QString message
         );
+    void bathymetryLoaded(bool success, double seabedDepth, const QString &message);
+    void underwaterDataLoaded(QDateTime time, bool success, const QString &message);
 
 private:
     bool loadCredentials();
@@ -83,6 +94,11 @@ private:
         bool isInitialLoad,
         const QString &message
         );
+    void downloadBathymetry();
+    void prepareUnderwaterQueue();
+    void processCurrentUnderwaterDownload(bool continueWithSurface);
+    void runSubset(const QStringList &args,
+                   std::function<void(bool, const QString &)> done);
 
     QString m_username;
     QString m_password;
@@ -97,6 +113,20 @@ private:
     QQueue<QDateTime> m_timeQueue;
 
     SurfaceCurrentData m_surfaceData;
+    QQueue<QDateTime> m_underwaterTimeQueue;
+    BathymetryData m_bathymetryData;
+    UnderwaterCurrentData m_underwaterData;
+
+    double m_startLatitude = 0.0;
+    double m_startLongitude = 0.0;
+    double m_minLatitude = 0.0;
+    double m_maxLatitude = 0.0;
+    double m_minLongitude = 0.0;
+    double m_maxLongitude = 0.0;
+    double m_seabedDepth = 0.0;
+
+    QDateTime m_underwaterStartDate;
+    QDateTime m_underwaterEndDate;
 };
 
 #endif

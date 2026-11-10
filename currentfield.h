@@ -7,13 +7,12 @@
 
 struct CurrentSample
 {
-    double u = 0.0;      // east  [m/s]
-    double v = 0.0;      // north [m/s]
-    bool valid = false;  // false = land or outside the data area
+    double u = 0.0;// east
+    double v = 0.0;// north
+    bool valid = false;//land or water
 };
 
-// Regular lat/lon grid built from the flat point list, so that
-// lookups are O(1) instead of scanning ~300k points per particle.
+
 class CurrentField
 {
 public:
@@ -22,8 +21,6 @@ public:
 
     bool contains(double latitude, double longitude) const;
 
-    // Bilinear interpolation. valid == false if the nearest grid
-    // cell is land or the position is outside the grid.
     CurrentSample sample(double latitude, double longitude) const;
 
 private:

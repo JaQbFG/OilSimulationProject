@@ -6,7 +6,6 @@
 
 namespace {
 
-// Smallest positive spacing between distinct sorted values.
 double gridStep(QVector<double> values)
 {
     std::sort(values.begin(), values.end());
@@ -115,7 +114,6 @@ CurrentSample CurrentField::sample(double latitude, double longitude) const
     const double fy = (latitude  - m_minLat) / m_dLat;
     const double fx = (longitude - m_minLon) / m_dLon;
 
-    // Nearest cell decides land / water (so particles beach at the coast).
     const int ni = qBound(0, qRound(fy), m_nLat - 1);
     const int nj = qBound(0, qRound(fx), m_nLon - 1);
 
@@ -147,8 +145,7 @@ CurrentSample CurrentField::sample(double latitude, double longitude) const
     double u = 0.0;
     double v = 0.0;
 
-    // Average only over water corners so land zeros do not
-    // artificially slow the flow near the coast.
+
     for (int k = 0; k < 4; ++k) {
         if (m_valid[cells[k]]) {
             sumW += weights[k];

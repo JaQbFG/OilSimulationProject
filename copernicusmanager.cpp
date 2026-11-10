@@ -9,7 +9,7 @@
 #include <QDir>
 #include <QFutureWatcher>
 #include <QtMath>
-
+#include <QTimeZone>
 #include <QtConcurrentRun>
 #include <QFileInfo>
 #include <cmath>
@@ -19,6 +19,13 @@
 static const QString kSurfaceDepth =
     "0.49402499198913574";
 
+static QDateTime parseUtc(const QString &text)
+{
+    QDateTime dt = QDateTime::fromString(text, Qt::ISODate);
+    if (dt.isValid())
+        dt.setTimeZone(QTimeZone::utc());
+    return dt;
+}
 
 struct SurfaceParseResult
 {
@@ -101,6 +108,10 @@ void CopernicusManager::prepareSurfaceData(
 
     m_timeQueue.clear();
     m_surfaceData = SurfaceCurrentData{};
+    m_underwaterTimeQueue.clear();
+    m_underwaterData = UnderwaterCurrentData{};
+    m_bathymetryData = BathymetryData{};
+    m_seabedDepth = 0.0;
 
     m_initialLoadPending = false;
 
@@ -115,15 +126,9 @@ void CopernicusManager::prepareSurfaceData(
         return;
     }
 
-    QDateTime start = QDateTime::fromString(
-        startStr,
-        Qt::ISODate
-        );
+    QDateTime start =parseUtc(startStr);
 
-    QDateTime end = QDateTime::fromString(
-        endStr,
-        Qt::ISODate
-        );
+    QDateTime end = parseUtc(endStr);
 
     if (!start.isValid() ||
         !end.isValid() ||
@@ -181,7 +186,7 @@ void CopernicusManager::prepareSurfaceData(
         );
 
 
-    downloadNext();
+    processCurrentDownload();
 }
 
 
@@ -202,38 +207,31 @@ void CopernicusManager::startBatchDownload(
 void CopernicusManager::downloadNext()
 {
     if (m_isDownloading) {
-        emit logMessage(
-            "Pobieranie lub parsowanie już trwa."
-            );
-
+        emit logMessage("Pobieranie lub parsowanie już trwa.");
         return;
     }
 
-    if (m_timeQueue.isEmpty()) {
-        emit downloadFinished(
-            true,
-            "Brak kolejnych terminów do pobrania."
-            );
-
+    if (m_timeQueue.isEmpty() && m_underwaterTimeQueue.isEmpty()) {
+        emit downloadFinished(true, "Brak kolejnych terminów do pobrania.");
         return;
     }
 
     if (m_username.isEmpty() || m_password.isEmpty()) {
         if (!loadCredentials()) {
-            const QString message =
-                "Nie udało się wczytać danych logowania.";
-
-            handleDownloadFailure(
-                m_timeQueue.dequeue(),
-                m_initialLoadPending,
-                message
-                );
-
+            emit downloadFinished(false, "Nie udało się wczytać danych logowania.");
             return;
         }
     }
 
-    processCurrentDownload();
+    const bool underwaterFirst =
+        !m_underwaterTimeQueue.isEmpty() &&
+        (m_timeQueue.isEmpty() ||
+         m_underwaterTimeQueue.head() <= m_timeQueue.head());
+
+    if (underwaterFirst)
+        processCurrentUnderwaterDownload(true);
+    else
+        processCurrentDownload();
 }
 
 
@@ -695,7 +693,7 @@ void CopernicusManager::checkLocation(
             .arg(nearestPoint->valid)
         );
 
-    const bool isLand = !nearestPoint->valid;
+    const bool isLand = bestDistance > 0.1 * 0.1 || !nearestPoint->valid;
 
     if (isLand) {
         emit locationCheckFinished(
