@@ -6,8 +6,8 @@ import QtPositioning
 
 ApplicationWindow {
     id: window
-    width: 800
-    height: 480
+    width: 850
+    height: 550
     minimumWidth: 200
     minimumHeight: 250
     visible: true
@@ -17,6 +17,7 @@ ApplicationWindow {
     property bool checking: false
     property bool pointChecked: false
     property bool pointConfirmed: false
+    property real spillVolumeML: 0
     
     property bool datesLocked: false
     property bool loadingInitialData: false
@@ -51,7 +52,7 @@ ApplicationWindow {
             }
 
             window.pointChecked = true
-            locationStatus.text = "Wybrano wodę. Potwierdź punkt."
+            locationStatus.text = "Wybrano wodę. Podaj ilość ropy i potwierdź punkt."
             rectangle1.showError("Punkt znajduje się na wodzie.", window.success)
         }
 
@@ -123,6 +124,7 @@ ApplicationWindow {
             oilSimulation.releaseDepth = copernicusManager.seabedDepth()
             oilSimulation.riseSpeed = 0.2 //how fast the oil rises
             oilSimulation.start()
+            oilSimulation.spillVolumeLiters = window.spillVolumeML * 1000000
         }
 
     }
@@ -246,6 +248,32 @@ ApplicationWindow {
                     }
                 }
 
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Label {
+                        text: "Ilość ropy [mln]:"
+                        color: window.lightMode ? window.dark : window.light
+                        font.pixelSize: 11
+                    }
+                    TextField {
+                        id: volumeInput
+                        placeholderText: "Np. 1.5"
+                        Layout.fillWidth: true
+                        font.pixelSize: 11
+                        padding: 8
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly
+                        enabled: window.pointChecked && !window.pointConfirmed
+                        opacity: enabled ? 1.0 : 0.5
+                        background: Rectangle {
+                            radius: 6
+                            color: window.lightMode ? "white" : "#111111"
+                            border.color: window.lightMode ? "#cccccc" : "#444444"
+                            border.width: 1
+                        }
+                    }
+                }
+
                 Button {
                     text: "Postaw"
                     Layout.fillWidth: true
@@ -297,6 +325,7 @@ ApplicationWindow {
                     font.pixelSize: 11
                     padding: 10
 
+
                     background: Rectangle {
                         radius: 6
                         color: window.lightMode ? "white" : "#333333"
@@ -312,6 +341,13 @@ ApplicationWindow {
                             return
                         }
                         if (window.pointChecked) {
+                        var volume = Number(volumeInput.text.replace(",", "."))
+                        if (volumeInput.text.trim() === "" || !isFinite(volume) || volume <= 0) {
+                            rectangle1.showError("Podaj prawidłową ilość ropy (mln litrów)!", window.error)
+                            return
+                        }
+                            window.spillVolumeML = volume
+
                             locationStatus.text = "Pobieranie batymetrii..."
                             copernicusManager.prepareUnderwaterData(
                                 map.markerCoordinate.latitude, map.markerCoordinate.longitude,
@@ -322,8 +358,6 @@ ApplicationWindow {
                             copernicusManager.checkLocation(
                                 map.markerCoordinate.latitude, map.markerCoordinate.longitude)
                         }
-
-
                     }
                 }
 
@@ -333,6 +367,7 @@ ApplicationWindow {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     font.pixelSize: 11
+                    Layout.topMargin: 6
                     font.bold: true
                     visible: text !== ""
                 }
