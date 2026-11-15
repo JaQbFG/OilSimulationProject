@@ -23,6 +23,7 @@ ApplicationWindow {
     property bool datesLocked: false
     property bool loadingInitialData: false
     property bool initialDataLoaded: false
+    property bool pointLocked: false
     
     property color reallyDark: "#1f1f1f"
     property color dark: "#262626"
@@ -32,6 +33,14 @@ ApplicationWindow {
     property color error: "red"
     property color warning: "#c97a00"
     property color success: "#2e8b57"
+
+    Timer {
+        id: liveTimer
+        interval: 1000
+        repeat: true
+        running: oilSimulation.running
+        onTriggered: map.finalPositions = oilSimulation.particlePositions()
+    }
 
     Connections {
         target: copernicusManager
@@ -100,15 +109,17 @@ ApplicationWindow {
         }
         function onBathymetryLoaded(success, seabedDepth, message) {
             if (!success) {
+                window.pointLocked = false
                 locationStatus.text = "Nie udało się pobrać batymetrii."
                 rectangle1.showError(message, window.error)
                 return
             }
-            locationStatus.text = "Głębokość dna: " + seabedDepth.toFixed(2) + " m"
         }
 
         function onUnderwaterDataLoaded(time, success, message) {
             if (!success) {
+                if (!window.pointConfirmed)
+                    window.pointLocked = false
                 rectangle1.showError(message, window.error)
                 return
             }
@@ -208,7 +219,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         font.pixelSize: 11
                         padding: 8
-                        enabled: window.initialDataLoaded
+                        enabled: window.initialDataLoaded && !window.pointLocked
                         background: Rectangle {
                             radius: 6
                             color: window.lightMode ? "white" : "#111111"
@@ -233,7 +244,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         font.pixelSize: 11
                         padding: 8
-                        enabled: window.initialDataLoaded
+                        enabled: window.initialDataLoaded && !window.pointLocked
                         background: Rectangle {
                             radius: 6
                             color: window.lightMode ? "white" : "#111111"
@@ -258,7 +269,7 @@ ApplicationWindow {
                         font.pixelSize: 11
                         padding: 8
                         inputMethodHints: Qt.ImhFormattedNumbersOnly
-                        enabled: window.pointChecked && !window.pointConfirmed
+                        enabled: window.pointChecked && !window.pointLocked
                         opacity: enabled ? 1.0 : 0.5
                         background: Rectangle {
                             radius: 6
@@ -283,7 +294,7 @@ ApplicationWindow {
                         font.pixelSize: 11
                         padding: 8
                         inputMethodHints: Qt.ImhFormattedNumbersOnly
-                        enabled: window.pointChecked && !window.pointConfirmed
+                        enabled: window.pointChecked && !window.pointLocked
                         opacity: enabled ? 1.0 : 0.5
                         background: Rectangle {
                             radius: 6
@@ -300,7 +311,7 @@ ApplicationWindow {
                     Layout.topMargin: 4
                     font.pixelSize: 11
                     padding: 10
-                    enabled: window.initialDataLoaded && !window.pointConfirmed
+                    enabled: window.initialDataLoaded && !window.pointLocked
                     background: Rectangle {
                         radius: 6
                         color: window.lightMode ? "white" : "#333333"
@@ -347,7 +358,7 @@ ApplicationWindow {
                     enabled: window.initialDataLoaded
                              && !window.checking
                              && !copernicusManager.isDownloading
-                             && !window.pointConfirmed
+                             && !window.pointLocked
                     Layout.fillWidth: true
                     Layout.topMargin: 4
                     font.pixelSize: 11
@@ -584,7 +595,7 @@ ApplicationWindow {
                 }
 
                 property real minZoom: 4
-                property real maxZoom: 8
+                property real maxZoom: 16
 
                 onZoomLevelChanged: {
                     if (map.targetZoom < minZoom) {
@@ -611,7 +622,12 @@ ApplicationWindow {
                             width: 6
                             height: 6
                             radius: 3
-                            color: "red"
+                            border.width: 1
+                            // border.color: "white"
+                            color: modelData.state === 1 ? "#e03131"
+                                 : modelData.state === 2 ? "#868e96"
+                                 : modelData.depth > 0.494 ? "#339af0"
+                                 : "#212529"
                         }
                     }
                 }
@@ -736,7 +752,7 @@ ApplicationWindow {
 
                     onReleased:(mouse)=> {
                         if (!hasDragged) {
-                            if (window.pointConfirmed) return
+                           if (window.pointLocked) return
                            if (!window.initialDataLoaded) {
                                rectangle1.showError(
                                    "Najpierw zatwierdź daty i pobierz dane.",

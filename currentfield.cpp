@@ -6,22 +6,6 @@
 
 namespace {
 
-double gridStep(QVector<double> values)
-{
-    std::sort(values.begin(), values.end());
-
-    double best = 0.0;
-
-    for (int i = 1; i < values.size(); ++i) {
-        const double d = values[i] - values[i - 1];
-
-        if (d > 1e-6 && (best == 0.0 || d < best)) {
-            best = d;
-        }
-    }
-
-    return best;
-}
 
 }
 
@@ -33,10 +17,7 @@ bool CurrentField::build(const SurfaceCurrentData &data)
         return false;
     }
 
-    QVector<double> lats;
-    QVector<double> lons;
-    lats.reserve(data.points.size());
-    lons.reserve(data.points.size());
+
 
     double maxLat = -1e9;
     double maxLon = -1e9;
@@ -44,8 +25,6 @@ bool CurrentField::build(const SurfaceCurrentData &data)
     m_minLon = 1e9;
 
     for (const SurfaceCurrentPoint &p : data.points) {
-        lats.append(p.latitude);
-        lons.append(p.longitude);
 
         m_minLat = std::min(m_minLat, p.latitude);
         maxLat   = std::max(maxLat,   p.latitude);
@@ -53,8 +32,8 @@ bool CurrentField::build(const SurfaceCurrentData &data)
         maxLon   = std::max(maxLon,   p.longitude);
     }
 
-    m_dLat = gridStep(lats);
-    m_dLon = gridStep(lons);
+    m_dLat = 1.0 / 12.0;
+    m_dLon = 1.0 / 12.0;
 
     if (m_dLat <= 0.0 || m_dLon <= 0.0) {
         return false;
