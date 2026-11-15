@@ -43,11 +43,65 @@ bool OilSimulation::setCurrentData(const SurfaceCurrentData &data)
     return ok;
 }
 
+double OilSimulation::spilledLiters() const
+{
+    if (m_spillVolumeLiters <= 0.0) {
+        return 0.0;
+    }
+
+    // Constant leak: only what flows out during the run, never more
+    // than what is on board.
+    if (m_leakRate > 0.0 && m_releaseDuration > 0.0) {
+        return qMin(m_spillVolumeLiters,
+                    m_leakRate * m_releaseDuration / 3600.0);
+    }
+
+    return m_spillVolumeLiters;
+}
+
+double OilSimulation::effectiveBlobLiters() const
+{
+    double blob = qMax(1.0, m_blobVolumeLiters);
+
+    // Too much oil for the particle cap: make the blobs bigger instead.
+    if (m_spillVolumeLiters > 0.0) {
+        blob = qMax(blob, spilledLiters() / m_maxParticles);
+    }
+
+    return blob;
+}
+
+int OilSimulation::totalParticles() const
+{
+    if (m_spillVolumeLiters <= 0.0) {
+        return m_maxParticles;
+    }
+
+    return qMax(1, qCeil(spilledLiters() / effectiveBlobLiters()));
+}
+
 void OilSimulation::start()
 {
     if (!m_field.isReady()) {
         emit logMessage("Symulacja: brak danych o prądach.");
         return;
+    }
+
+    if (m_particles.isEmpty() && m_spillVolumeLiters > 0.0) {
+        QString msg = QString("Symulacja: wyciek %1 l (na pokładzie: %2 l) = "
+                              "%3 cząsteczek po %4 l.")
+                          .arg(spilledLiters(), 0, 'f', 0)
+                          .arg(m_spillVolumeLiters, 0, 'f', 0)
+                          .arg(totalParticles())
+                          .arg(effectiveBlobLiters(), 0, 'f', 0);
+
+        if (effectiveBlobLiters() > m_blobVolumeLiters + 1e-9) {
+            msg += QString(" Cząsteczki powiększone z %1 l (limit %2 cząsteczek).")
+                       .arg(m_blobVolumeLiters, 0, 'f', 0)
+                       .arg(m_maxParticles);
+        }
+
+        emit logMessage(msg);
     }
 
     if (!m_active) {
@@ -68,6 +122,24 @@ void OilSimulation::stop()
         m_active = false;
         emit runningChanged();
     }
+}
+
+void OilSimulation::finish()
+{
+    stop();
+
+    const int floating = m_particles.size() - m_beachedCount - m_leftCount;
+
+    emit logMessage(
+        QString("Koniec symulacji: %1 cząsteczek po %2 l | na wodzie: %3, "
+                "osiadło: %4, poza obszarem: %5.")
+            .arg(m_particles.size())
+            .arg(effectiveBlobLiters(), 0, 'f', 0)
+            .arg(floating)
+            .arg(m_beachedCount)
+            .arg(m_leftCount));
+
+    emit finished();
 }
 
 void OilSimulation::reset()
@@ -117,6 +189,13 @@ void OilSimulation::step()
 
     emit stepped();
 
+    // Everything released and nothing left moving: nothing more to simulate.
+    if (m_particles.size() >= totalParticles() &&
+        m_beachedCount + m_leftCount >= m_particles.size()) {
+        finish();
+        return;
+    }
+
     if (m_dataElapsed >= m_dataInterval - 1e-6) {
         m_waiting = true;
         m_timer.stop();
@@ -129,12 +208,37 @@ void OilSimulation::step()
 
 void OilSimulation::release(double dt)
 {
-    m_releaseCarry += m_releaseRate * dt / 3600.0;
+    const int total = totalParticles();
+    const int remaining = total - m_particles.size();
+
+    if (remaining <= 0) {
+        return;
+    }
+
+    const double blob = effectiveBlobLiters();
+
+    // particles per hour
+    double rate = m_releaseRate;
+
+    const bool timed = m_releaseDuration > 0.0 && m_spillVolumeLiters > 0.0;
+
+    if (timed && m_leakRate > 0.0) {
+        rate = m_leakRate / blob;                   // constant leak
+    } else if (timed) {
+        rate = total * 3600.0 / m_releaseDuration;  // everything over the run
+    }
+
+    m_releaseCarry += rate * dt / 3600.0;
 
     int count = static_cast<int>(m_releaseCarry);
     m_releaseCarry -= count;
 
-    count = qMin(count, m_maxParticles - m_particles.size());
+    // Last step of the release window: release whatever rounding left over.
+    if (timed && m_elapsed + dt >= m_releaseDuration - 1e-6) {
+        count = remaining;
+    }
+
+    count = qMin(count, remaining);
 
     for (int i = 0; i < count; ++i) {
         OilParticle p;
@@ -142,6 +246,7 @@ void OilSimulation::release(double dt)
         p.latitude = m_spillLat;
         p.longitude = m_spillLon;
         p.depth = m_releaseDepth;
+        p.mass = blob;
         m_particles.append(p);
     }
 }
@@ -225,6 +330,7 @@ QVariantList OilSimulation::particlePositions() const
         m["state"] = static_cast<int>(p.state);
         m["id"] = p.id;
         m["depth"] = p.depth;
+        m["liters"] = p.mass;
         list.append(m);
     }
 

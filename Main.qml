@@ -18,6 +18,7 @@ ApplicationWindow {
     property bool pointChecked: false
     property bool pointConfirmed: false
     property real spillVolumeML: 0
+    property real leakRateM3h: 0
     
     property bool datesLocked: false
     property bool loadingInitialData: false
@@ -117,46 +118,32 @@ ApplicationWindow {
             rectangle1.showError("Punkt potwierdzony. Start symulacji.", window.success)
 
             oilSimulation.reset()
+            map.finalPositions = []
+
+
+            var runSeconds = (Date.parse(endDateInput.text + "Z")
+                              - Date.parse(startDateInput.text + "Z")) / 1000 + 3600
+
             oilSimulation.spillLatitude = map.markerCoordinate.latitude
             oilSimulation.spillLongitude = map.markerCoordinate.longitude
-            oilSimulation.timeStep = 450 //how often positions get updated
-            oilSimulation.releaseRate = 60 //seconds for 1 particle
-            oilSimulation.releaseDepth = copernicusManager.seabedDepth()
-            oilSimulation.riseSpeed = 0.2 //how fast the oil rises
-            oilSimulation.start()
             oilSimulation.spillVolumeLiters = window.spillVolumeML * 1000000
+            oilSimulation.leakRateLitersPerHour = window.leakRateM3h * 1000
+            oilSimulation.blobVolumeLiters = 1000
+            oilSimulation.releaseDuration = runSeconds
+            oilSimulation.timeStep = 900
+            oilSimulation.releaseDepth = copernicusManager.seabedDepth()
+            oilSimulation.riseSpeed = 0.2
+            oilSimulation.start()
         }
 
     }
     Connections {
         target: oilSimulation
 
-        function onStepped() {
-            var t = oilSimulation.elapsedSeconds
-
-            if (t === 0) {
-                window.lastLoggedTime = -1
-                return
-            }
-
-            if (t - window.lastLoggedTime < 900)
-                return
-
-            window.lastLoggedTime = t
-
-            var list = oilSimulation.particlePositions()
-            var states = ["pływa", "osiadła", "poza obszarem"]
-            var maxLogged = 20//logged particles
-
-            console.log("=== t =", Math.round(t / 60), "min | cząsteczek:", list.length)
-
-            for (var i = 0; i < Math.min(list.length, maxLogged); i++) {
-                console.log("  #" + i,
-                            list[i].lat.toFixed(5),
-                            list[i].lon.toFixed(5),
-                            states[list[i].state],
-                            list[i].depth.toFixed(1) + " m")
-            }
+        function onFinished() {
+            map.finalPositions = oilSimulation.particlePositions()
+            rectangle1.showError("Symulacja zakończona. Cząsteczek: " + map.finalPositions.length,
+                                 window.success)
         }
     }
     Connections {
@@ -166,6 +153,14 @@ ApplicationWindow {
                         state === 1 ? "osiadła na brzegu" : "opuściła obszar",
                         "| lat", lat.toFixed(5), "lon", lon.toFixed(5),
                         "|", timeUtc, "UTC | t =", Math.round(simSeconds / 60), "min")
+        }
+        function onLogMessage(message) {
+            console.log("[Simulation]", message)
+        }
+        function onStepped() {
+            locationStatus.text = "Symulacja: " + (oilSimulation.elapsedSeconds / 3600).toFixed(2)
+                                  + " h | cząsteczek: " + oilSimulation.particleCount
+                                  + " / " + oilSimulation.totalParticles
         }
     }
 
@@ -273,6 +268,31 @@ ApplicationWindow {
                         }
                     }
                 }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Label {
+                        text: "Wyciek [m³/h]:"
+                        color: window.lightMode ? window.dark : window.light
+                        font.pixelSize: 11
+                    }
+                    TextField {
+                        id: leakInput
+                        placeholderText: "Np. 100"
+                        Layout.fillWidth: true
+                        font.pixelSize: 11
+                        padding: 8
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly
+                        enabled: window.pointChecked && !window.pointConfirmed
+                        opacity: enabled ? 1.0 : 0.5
+                        background: Rectangle {
+                            radius: 6
+                            color: window.lightMode ? "white" : "#111111"
+                            border.color: window.lightMode ? "#cccccc" : "#444444"
+                            border.width: 1
+                        }
+                    }
+                }
 
                 Button {
                     text: "Postaw"
@@ -310,6 +330,14 @@ ApplicationWindow {
                             return
                         }
 
+                        var current = map.markerCoordinate
+
+                        if (current !== null &&
+                            Math.abs(current.latitude - latitude) < 0.00001 &&
+                            Math.abs(current.longitude - longitude) < 0.00001) {
+                            return   // same point: keep the check result
+                        }
+
                         map.markerCoordinate = QtPositioning.coordinate(latitude, longitude)
                     }
                 }
@@ -334,7 +362,8 @@ ApplicationWindow {
                     }
 
                     onClicked: {
-                        console.log("Kliknięto Zatwierdź")
+                        console.log("Kliknięto Zatwierdź | pointChecked =", window.pointChecked,
+                                    "| volume =", volumeInput.text)
 
                         if (map.markerCoordinate === null) {
                             rectangle1.showError("Najpierw wybierz lokalizację!", window.error)
@@ -346,6 +375,12 @@ ApplicationWindow {
                             rectangle1.showError("Podaj prawidłową ilość ropy (mln litrów)!", window.error)
                             return
                         }
+                            var leak = Number(leakInput.text.replace(",", "."))
+                            if (leakInput.text.trim() === "" || !isFinite(leak) || leak <= 0) {
+                                rectangle1.showError("Podaj prawidłowy wyciek (m³/h)!", window.error)
+                                return
+                            }
+                            window.leakRateM3h = leak
                             window.spillVolumeML = volume
 
                             locationStatus.text = "Pobieranie batymetrii..."
@@ -562,8 +597,27 @@ ApplicationWindow {
                 }
 
                 property var markerCoordinate: null
+                property var finalPositions: []
 
+                MapItemView {
+                    model: map.finalPositions
+
+                    delegate: MapQuickItem {
+                        coordinate: QtPositioning.coordinate(modelData.lat, modelData.lon)
+                        anchorPoint.x: 3
+                        anchorPoint.y: 3
+
+                        sourceItem: Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: "red"
+                        }
+                    }
+                }
                 onMarkerCoordinateChanged: {
+                    console.log("[MARKER] changed ->",
+                                markerCoordinate ? markerCoordinate.latitude + ", " + markerCoordinate.longitude : "null")
                     if (markerCoordinate !== null) {
                         latInput.text = markerCoordinate.latitude.toFixed(5)
                         lonInput.text = markerCoordinate.longitude.toFixed(5)

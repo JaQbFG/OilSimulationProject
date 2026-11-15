@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
                          if (copernicusManager.hasPending())
                              copernicusManager.downloadNext();
                          else
-                             oilSimulation.stop();
+                             oilSimulation.finish();
                      });
 
     QObject::connect(&copernicusManager, &CopernicusManager::underwaterDataLoaded,

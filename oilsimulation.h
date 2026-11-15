@@ -20,7 +20,7 @@ struct OilParticle
     double longitude = 0.0;
     double depth = 0.0;
     double age = 0.0;
-    double mass = 1.0;
+    double mass = 1.0;   // liters of oil represented by this blob
 
     State state = Floating;
 };
@@ -46,6 +46,15 @@ class OilSimulation : public QObject
     Q_PROPERTY(int beachedCount READ beachedCount NOTIFY stepped)
     Q_PROPERTY(int leftCount READ leftCount NOTIFY stepped)
 
+    // Spill size
+    Q_PROPERTY(double spillVolumeLiters MEMBER m_spillVolumeLiters NOTIFY paramsChanged) //oil on board [l] = upper limit of what can leak
+    Q_PROPERTY(double leakRateLitersPerHour MEMBER m_leakRate NOTIFY paramsChanged) //constant outflow [l/h]; 0 = whole spillVolume over releaseDuration
+    Q_PROPERTY(double blobVolumeLiters  MEMBER m_blobVolumeLiters  NOTIFY paramsChanged) //oil per particle [l]
+    Q_PROPERTY(double releaseDuration   MEMBER m_releaseDuration   NOTIFY paramsChanged) //s, length of the run the leak lasts; 0 = use releaseRate
+    Q_PROPERTY(double spilledLiters READ spilledLiters NOTIFY paramsChanged)
+    Q_PROPERTY(int totalParticles READ totalParticles NOTIFY paramsChanged)
+    Q_PROPERTY(double effectiveBlobLiters READ effectiveBlobLiters NOTIFY paramsChanged)
+
 
     Q_PROPERTY(double diffusivity MEMBER m_diffusivity NOTIFY paramsChanged) //[m^2/s]
 
@@ -65,6 +74,7 @@ public:
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
+    Q_INVOKABLE void finish(); //stop + emit finished()
     Q_INVOKABLE void reset();
     Q_INVOKABLE void step(); //one step of timeStep seconds
 
@@ -76,6 +86,14 @@ public:
     double elapsedSeconds() const { return m_elapsed; }
     bool running() const { return m_active; }
     bool waitingForData() const { return m_waiting; }
+
+    // Oil that actually leaves the ship during the run:
+    // min(oil on board, leak rate * run length).
+    double spilledLiters() const;
+    // Number of blobs the spilled oil is split into.
+    int totalParticles() const;
+    // Oil per blob: blobVolumeLiters, or larger if the particle cap would be exceeded.
+    double effectiveBlobLiters() const;
 
     Q_INVOKABLE QVariantList eventLog() const;
     Q_INVOKABLE QString currentTimeText() const;
@@ -90,6 +108,7 @@ signals:
     void paramsChanged();
     void stepped();
     void runningChanged();
+    void finished();
     void logMessage(const QString &message);
     void particleEvent(int id, double latitude, double longitude,
                        double simSeconds, const QString &timeUtc, int state);
@@ -107,7 +126,12 @@ private:
 
     double m_spillLat = 0.0;
     double m_spillLon = 0.0;
-    double m_releaseRate = 3600.0;//1 particle/s of simulated time
+    double m_releaseRate = 3600.0;//particles per hour (used when releaseDuration == 0)
+
+    double m_spillVolumeLiters = 0.0;//0 = unlimited (old behaviour)
+    double m_blobVolumeLiters = 1000.0;
+    double m_releaseDuration = 0.0;
+    double m_leakRate = 0.0;//l/h, 0 = release everything over releaseDuration
 
     double m_diffusivity = 10.0; // m^2/s
 
