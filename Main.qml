@@ -34,6 +34,8 @@ ApplicationWindow {
     property color warning: "#c97a00"
     property color success: "#2e8b57"
 
+    property string statusText: ""
+
     Timer {
         id: liveTimer
         interval: 1000
@@ -46,10 +48,12 @@ ApplicationWindow {
         target: copernicusManager
 
         function onLocationCheckFinished(success, isLand, message) {
+            errorToast.hideBusy()
             console.log("locationCheckFinished:", success, isLand, message)
             window.checking = false
 
             if (!success) {
+                errorToast.hideBusy()
                 window.pointChecked = false
                 rectangle1.showError(message, window.error)
                 return
@@ -62,7 +66,7 @@ ApplicationWindow {
             }
 
             window.pointChecked = true
-            locationStatus.text = "Wybrano wodę. Podaj ilość ropy i potwierdź punkt."
+            window.statusText = "Wybrano wodę. Podaj ilość ropy i potwierdź punkt."
             rectangle1.showError("Punkt znajduje się na wodzie.", window.success)
         }
 
@@ -72,10 +76,12 @@ ApplicationWindow {
         }
 
         function onDownloadFinished(success, message) {
+            errorToast.hideBusy()
             console.log("Download:", success, message)
             errorToast.show(message, success ? window.success : window.error)
         }
         function onInitialSurfaceDataLoaded(success, message) {
+            errorToast.hideBusy()
             console.log(
                 "[INITIAL DATA]",
                 "success =", success,
@@ -110,13 +116,14 @@ ApplicationWindow {
         function onBathymetryLoaded(success, seabedDepth, message) {
             if (!success) {
                 window.pointLocked = false
-                locationStatus.text = "Nie udało się pobrać batymetrii."
+                window.statusText = "Nie udało się pobrać batymetrii."
                 rectangle1.showError(message, window.error)
                 return
             }
         }
 
         function onUnderwaterDataLoaded(time, success, message) {
+            errorToast.hideBusy()
             if (!success) {
                 if (!window.pointConfirmed)
                     window.pointLocked = false
@@ -169,7 +176,7 @@ ApplicationWindow {
             console.log("[Simulation]", message)
         }
         function onStepped() {
-            locationStatus.text = "Symulacja: " + (oilSimulation.elapsedSeconds / 3600).toFixed(2)
+            window.statusText = "Symulacja: " + (oilSimulation.elapsedSeconds / 3600).toFixed(2)
                                   + " h | cząsteczek: " + oilSimulation.particleCount
                                   + " / " + oilSimulation.totalParticles
         }
@@ -394,7 +401,7 @@ ApplicationWindow {
                             window.leakRateM3h = leak
                             window.spillVolumeML = volume
 
-                            locationStatus.text = "Pobieranie batymetrii..."
+                            errorToast.showBusy("Pobieranie batymetrii...", false)
                             copernicusManager.prepareUnderwaterData(
                                 map.markerCoordinate.latitude, map.markerCoordinate.longitude,
                                 startDateInput.text, endDateInput.text)
@@ -405,17 +412,6 @@ ApplicationWindow {
                                 map.markerCoordinate.latitude, map.markerCoordinate.longitude)
                         }
                     }
-                }
-
-                Label {
-                    id: locationStatus
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: 11
-                    Layout.topMargin: 6
-                    font.bold: true
-                    visible: text !== ""
                 }
 
                 Rectangle {
@@ -512,7 +508,6 @@ ApplicationWindow {
                     }
 
                     onClicked: {
-                        errorToast.showBusy("Pobieranie danych... 0%", true)
                         var startText = startDateInput.text.trim()
                         var endText = endDateInput.text.trim()
 
@@ -543,7 +538,7 @@ ApplicationWindow {
 
                         window.datesLocked = true
                         window.loadingInitialData = true
-
+                        errorToast.showBusy("Pobieranie danych...", false)
                         copernicusManager.prepareSurfaceData(
                             startText,
                             endText,
@@ -623,7 +618,6 @@ ApplicationWindow {
                             height: 6
                             radius: 3
                             border.width: 1
-                            // border.color: "white"
                             color: modelData.state === 1 ? "#e03131"
                                  : modelData.state === 2 ? "#868e96"
                                  : modelData.depth > 0.494 ? "#339af0"
@@ -639,7 +633,7 @@ ApplicationWindow {
                         lonInput.text = markerCoordinate.longitude.toFixed(5)
                     }
                     window.pointChecked = false
-                    locationStatus.text = ""
+                    window.statusText = ""
                 }
 
                 MapQuickItem {
@@ -876,167 +870,261 @@ ApplicationWindow {
             }
 
             Rectangle {
-                id: errorToast
+                id: statusBar
+                anchors.top: parent.top
+                anchors.topMargin: 8
                 anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 8
-
-                property bool busy: false
-                property bool showProgress: false
-
-                width: Math.max(errorMessage.width + 34)
-                height: Math.max(errorMessage.implicitHeight, 14) + 12 + (showProgress ? 9 : 0)
-
+                width: Math.min(Math.max(200, Math.ceil(statusMetrics.advanceWidth) + 24),
+                                parent.width - 16)
+                height: statusLabel.implicitHeight + 12
                 radius: 8
                 color: window.dark
-                visible: false
-                opacity: 0
-
-                function show(message, color) {
-                    errorFade.stop()
-                    errorTimer.stop()
-
-                    busy = false
-                    showProgress = false
-                    errorMessage.text = message
-                    statusDot.color = color
-                    errorToast.opacity = 1
-                    errorToast.visible = true
-
-                    errorTimer.start()
-                }
-
-                function showBusy(message, withProgress) {
-                    errorFade.stop()
-                    errorTimer.stop()
-
-                    busy = true
-                    showProgress = withProgress === true
-                    errorMessage.text = message
-                    errorToast.opacity = 1
-                    errorToast.visible = true
-                }
+                visible: window.statusText !== ""
 
                 TextMetrics {
-                    id: textMetrics
-                    font: errorMessage.font
-                    text: errorMessage.text
-                }
-
-                Item {
-                    id: indicator
-                    width: 14
-                    height: 14
-                    anchors.left: parent.left
-                    anchors.leftMargin: 8
-                    anchors.top: parent.top
-                    anchors.topMargin: 6.5
-
-                    Rectangle {
-                        id: statusDot
-                        width: 10
-                        height: 10
-                        radius: 5
-                        anchors.centerIn: parent
-                        visible: !errorToast.busy
-                    }
-
-                    Item {
-                        id: spinner
-                        anchors.fill: parent
-                        visible: errorToast.busy
-
-                        Canvas {
-                            anchors.fill: parent
-                            antialiasing: true
-
-                            onPaint: {
-                                var ctx = getContext("2d")
-                                ctx.reset()
-                                ctx.lineWidth = 2
-                                ctx.lineCap = "round"
-
-                                var cx = width / 2
-                                var cy = height / 2
-                                var r = width / 2 - 1.5
-
-                                ctx.strokeStyle = "rgba(255, 255, 255, 0.2)"
-                                ctx.beginPath()
-                                ctx.arc(cx, cy, r, 0, Math.PI * 2)
-                                ctx.stroke()
-
-                                ctx.strokeStyle = "white"
-                                ctx.beginPath()
-                                ctx.arc(cx, cy, r, 0, Math.PI * 0.75)
-                                ctx.stroke()
-                            }
-                        }
-
-                        RotationAnimator {
-                            target: spinner
-                            from: 0
-                            to: 360
-                            duration: 800
-                            loops: Animation.Infinite
-                            running: errorToast.busy && errorToast.visible
-                        }
-                    }
+                    id: statusMetrics
+                    font: statusLabel.font
+                    text: window.statusText
                 }
 
                 Label {
-                    id: errorMessage
+                    id: statusLabel
+                    anchors.centerIn: parent
+                    width: parent.width - 24
+                    text: window.statusText
                     color: "white"
-                    anchors.left: indicator.right
-                    anchors.leftMargin: 6
-                    anchors.top: parent.top
-                    anchors.topMargin: 6
-                    width: Math.min(Math.ceil(textMetrics.advanceWidth) + 4,
-                                    Math.max(120, rectangle2.width - 200))
-                    wrapMode: Text.WordWrap
-                    horizontalAlignment: Text.AlignLeft
                     font.pixelSize: 11
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
                 }
+            }
 
-                Rectangle {
-                    id: progressTrack
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.leftMargin: 6
-                    anchors.rightMargin: 6
-                    anchors.bottomMargin: 6
-                    height: 3
-                    radius: 1.5
-                    color: "#444444"
-                    visible: errorToast.showProgress
+            ListModel { id: toastModel }
 
-                    Rectangle {
-                        height: parent.height
-                        radius: parent.radius
-                        width: parent.width * Math.min(1, copernicusManager.progress / 100.0)
-                        color: "#2e8b57"
+            Column {
+                id: errorToast
+                clip: false
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2
+                anchors.left: parent.left
+                anchors.right: parent.right
+                spacing: 0
 
-                        Behavior on width {
-                            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+                readonly property int maxToasts: 5
+
+                function makeRoom() {
+                    var normal = 0
+                    for (var i = 0; i < toastModel.count; i++) {
+                        if (!toastModel.get(i).busy)
+                            normal++
+                    }
+                    if (normal < maxToasts)
+                        return
+                    for (var j = 0; j < toastModel.count; j++) {
+                        if (!toastModel.get(j).busy) {
+                            toastModel.remove(j)
+                            return
                         }
                     }
                 }
 
-                Timer {
-                    id: errorTimer
-                    interval: 2500
-                    repeat: false
-                    onTriggered: errorFade.start()
+                function show(message, color) {
+                    makeRoom()
+                    toastModel.append({ message: message, dotColor: String(color),
+                                        busy: false, showProgress: false })
                 }
 
-                NumberAnimation {
-                    id: errorFade
-                    target: errorToast
-                    property: "opacity"
-                    to: 0
-                    duration: 500
-                    easing.type: Easing.InOutQuad
-                    onFinished: errorToast.visible = false
+                function showBusy(message, withProgress) {
+                    for (var i = 0; i < toastModel.count; i++) {
+                        if (toastModel.get(i).busy) {
+                            toastModel.setProperty(i, "message", message)
+                            toastModel.setProperty(i, "showProgress", withProgress === true)
+                            return
+                        }
+                    }
+                    toastModel.append({ message: message, dotColor: "white",
+                                        busy: true, showProgress: withProgress === true })
+                }
+
+                function hideBusy() {
+                    for (var i = toastModel.count - 1; i >= 0; i--) {
+                        if (toastModel.get(i).busy)
+                            toastModel.remove(i)
+                    }
+                }
+
+                Repeater {
+                    model: toastModel
+
+                    delegate: Item {
+                        id: row
+                        required property int index
+                        required property string message
+                        required property string dotColor
+                        required property bool busy
+                        required property bool showProgress
+
+                        property real collapse: 0
+
+                        width: errorToast.width
+                        height: (toast.height + 6) * collapse
+
+                        Component.onCompleted: growIn.start()
+
+                        NumberAnimation {
+                            id: growIn
+                            target: row
+                            property: "collapse"
+                            to: 1
+                            duration: 250
+                            easing.type: Easing.OutCubic
+                        }
+
+                        Rectangle {
+                            id: toast
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            width: msg.width + 34
+                            height: Math.max(msg.implicitHeight, 14) + 12 + (row.showProgress ? 9 : 0)
+                            radius: 8
+                            color: window.dark
+                            opacity: 0
+
+                            Component.onCompleted: opacity = 1
+                            Behavior on opacity { NumberAnimation { duration: 100 } }
+
+                            Timer {
+                                interval: 5000
+                                running: !row.busy
+                                onTriggered: fadeOut.start()
+                            }
+
+                            SequentialAnimation {
+                                id: fadeOut
+
+                                NumberAnimation {
+                                    target: toast
+                                    property: "opacity"
+                                    to: 0
+                                    duration: 500
+                                    easing.type: Easing.InOutQuad
+                                }
+                                NumberAnimation {
+                                    target: row
+                                    property: "collapse"
+                                    to: 0
+                                    duration: 250
+                                    easing.type: Easing.OutCubic
+                                }
+                                ScriptAction {
+                                    script: toastModel.remove(row.index)
+                                }
+                            }
+
+                            TextMetrics {
+                                id: metrics
+                                font: msg.font
+                                text: row.message
+                            }
+
+                            Item {
+                                id: indicator
+                                width: 14
+                                height: 14
+                                anchors.left: parent.left
+                                anchors.leftMargin: 8
+                                anchors.top: parent.top
+                                anchors.topMargin: 6.5
+
+                                Rectangle {
+                                    width: 10
+                                    height: 10
+                                    radius: 5
+                                    anchors.centerIn: parent
+                                    color: row.dotColor
+                                    visible: !row.busy
+                                }
+
+                                Item {
+                                    id: spinner
+                                    anchors.fill: parent
+                                    visible: row.busy
+
+                                    Canvas {
+                                        anchors.fill: parent
+                                        antialiasing: true
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.reset()
+                                            ctx.lineWidth = 2
+                                            ctx.lineCap = "round"
+                                            var cx = width / 2
+                                            var cy = height / 2
+                                            var r = width / 2 - 1.5
+
+                                            ctx.strokeStyle = "rgba(255, 255, 255, 0.2)"
+                                            ctx.beginPath()
+                                            ctx.arc(cx, cy, r, 0, Math.PI * 2)
+                                            ctx.stroke()
+
+                                            ctx.strokeStyle = "white"
+                                            ctx.beginPath()
+                                            ctx.arc(cx, cy, r, 0, Math.PI * 0.75)
+                                            ctx.stroke()
+                                        }
+                                    }
+
+                                    RotationAnimator {
+                                        target: spinner
+                                        from: 0
+                                        to: 360
+                                        duration: 800
+                                        loops: Animation.Infinite
+                                        running: row.busy
+                                    }
+                                }
+                            }
+
+                            Label {
+                                id: msg
+                                text: row.message
+                                color: "white"
+                                anchors.left: indicator.right
+                                anchors.leftMargin: 6
+                                anchors.top: parent.top
+                                anchors.topMargin: 6
+                                width: Math.min(Math.ceil(metrics.advanceWidth) + 4,
+                                                Math.max(120, rectangle2.width - 200))
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignLeft
+                                font.pixelSize: 11
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 6
+                                anchors.rightMargin: 6
+                                anchors.bottomMargin: 6
+                                height: 3
+                                radius: 1.5
+                                color: "#444444"
+                                visible: row.showProgress
+
+                                Rectangle {
+                                    height: parent.height
+                                    radius: parent.radius
+                                    width: parent.width * Math.min(1, copernicusManager.progress / 100.0)
+                                    color: "#2e8b57"
+                                    Behavior on width {
+                                        NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
